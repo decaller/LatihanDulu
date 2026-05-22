@@ -1,0 +1,5 @@
+prefect
+pydantic
+ollama
+httpx
+python-dotenv
