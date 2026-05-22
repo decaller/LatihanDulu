@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - /home/abuhafi/Project/TesDeen/backend/data.db:/app/data.db
+    environment:
+      - OLLAMA_URL=http://100.121.116.17:11434
+      - DB_PATH=/app/data.db
+      - DEFAULT_MODEL=llama3.1:latest
+    network_mode: "host"

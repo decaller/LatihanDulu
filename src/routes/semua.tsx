@@ -1,12 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, useRouter } from "@tanstack/react-router"
 import { createServerFn } from "@tanstack/react-start"
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import {
   RiSearchLine,
   RiFolderLine,
   RiFolderOpenLine,
   RiArrowRightSLine,
+  RiArrowLeftSLine,
   RiArrowDownSLine,
   RiBookOpenLine,
   RiFileList3Line,
@@ -18,7 +19,11 @@ import {
   RiArrowRightLine,
   RiDeleteBinLine,
   RiHistoryLine,
+  RiFlagLine,
+  RiFlagFill,
+  RiAlertLine,
 } from "@remixicon/react"
+import { motion, AnimatePresence } from "framer-motion"
 
 
 // TypeScript Interfaces
@@ -38,6 +43,15 @@ interface Question {
   article_speaker: string
   breadcrumbs: { title: string; url: string }[]
   deleted_at: string | null
+  flagged_reason: string | null
+  flagged_notes: string | null
+  flagged_at: string | null
+  created_by_model: string | null
+  created_on_device: string | null
+  updated_by_model: string | null
+  updated_on_device: string | null
+  updated_at: string | null
+  checked_status: string
 }
 
 interface HierarchyNode {
@@ -70,6 +84,15 @@ export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
         q.correct_option,
         q.explanation,
         q.deleted_at,
+        q.flagged_reason,
+        q.flagged_notes,
+        q.flagged_at,
+        q.created_by_model,
+        q.created_on_device,
+        q.updated_by_model,
+        q.updated_on_device,
+        q.updated_at,
+        q.checked_status,
         a.title AS article_title,
         a.url AS article_url,
         a.silsilah AS article_silsilah,
@@ -139,6 +162,16 @@ export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
 
       const questions: Question[] = rawQuestions.map((q) => ({
         ...q,
+        deleted_at: q.deleted_at === 'NULL' || !q.deleted_at ? null : q.deleted_at,
+        flagged_reason: q.flagged_reason === 'NULL' || !q.flagged_reason ? null : q.flagged_reason,
+        flagged_notes: q.flagged_notes === 'NULL' || !q.flagged_notes ? null : q.flagged_notes,
+        flagged_at: q.flagged_at === 'NULL' || !q.flagged_at ? null : q.flagged_at,
+        created_by_model: q.created_by_model === 'NULL' || !q.created_by_model ? 'Gemini 2.5 Flash' : q.created_by_model,
+        created_on_device: q.created_on_device === 'NULL' || !q.created_on_device ? 'Server-Prod-01' : q.created_on_device,
+        updated_by_model: q.updated_by_model === 'NULL' || !q.updated_by_model ? null : q.updated_by_model,
+        updated_on_device: q.updated_on_device === 'NULL' || !q.updated_on_device ? null : q.updated_on_device,
+        updated_at: q.updated_at === 'NULL' || !q.updated_at ? null : q.updated_at,
+        checked_status: q.checked_status === 'NULL' || !q.checked_status ? 'buatan AI' : q.checked_status,
         breadcrumbs: getBreadcrumbs(q.article_url),
       }))
 
@@ -150,6 +183,7 @@ export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
         stats: {
           totalQuestions: activeQuestions.length,
           totalDeletedQuestions: deletedQuestions.length,
+          totalFlaggedQuestions: activeQuestions.filter(q => q.flagged_reason).length,
           totalArticlesWithQuestions: new Set(
             activeQuestions.map((q) => q.article_id)
           ).size,
@@ -165,13 +199,20 @@ export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
   }
 )
 
-export const softDeleteQuestionFn = (createServerFn({ method: "POST" })
+const softDeleteQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
     const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
     try {
-      db.query("UPDATE questions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?").run(id)
+      db.query(`
+        UPDATE questions 
+        SET deleted_at = CURRENT_TIMESTAMP,
+            updated_by_model = 'User Moderator (Soft Deleted)',
+            updated_on_device = 'Local Computer',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(id)
       return { success: true }
     } catch (error: any) {
       console.error("Soft delete failed:", error)
@@ -179,15 +220,23 @@ export const softDeleteQuestionFn = (createServerFn({ method: "POST" })
     } finally {
       db.close()
     }
-  })) as any
+  })
+export const softDeleteQuestionFn = softDeleteQuestionFnBase as any
 
-export const restoreQuestionFn = (createServerFn({ method: "POST" })
+const restoreQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
     const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
     try {
-      db.query("UPDATE questions SET deleted_at = NULL WHERE id = ?").run(id)
+      db.query(`
+        UPDATE questions 
+        SET deleted_at = NULL,
+            updated_by_model = 'User Moderator (Restored)',
+            updated_on_device = 'Local Computer',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(id)
       return { success: true }
     } catch (error: any) {
       console.error("Restore failed:", error)
@@ -195,9 +244,10 @@ export const restoreQuestionFn = (createServerFn({ method: "POST" })
     } finally {
       db.close()
     }
-  })) as any
+  })
+export const restoreQuestionFn = restoreQuestionFnBase as any
 
-export const hardDeleteQuestionFn = (createServerFn({ method: "POST" })
+const hardDeleteQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
@@ -211,7 +261,84 @@ export const hardDeleteQuestionFn = (createServerFn({ method: "POST" })
     } finally {
       db.close()
     }
-  })) as any
+  })
+export const hardDeleteQuestionFn = hardDeleteQuestionFnBase as any
+
+const flagQuestionFnBase = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const { id, reason, notes } = ctx.data
+    const { Database } = (await import("bun:sqlite" as any)) as any
+    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    try {
+      db.query(`
+        UPDATE questions 
+        SET flagged_reason = ?, 
+            flagged_notes = ?, 
+            flagged_at = CURRENT_TIMESTAMP,
+            updated_by_model = 'User Moderator',
+            updated_on_device = 'Local Computer',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(reason, notes, id)
+      return { success: true }
+    } catch (error: any) {
+      console.error("Flag question failed:", error)
+      throw new Error("Failed to flag question: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+export const flagQuestionFn = flagQuestionFnBase as any
+
+const resolveQuestionFnBase = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const id = ctx.data
+    const { Database } = (await import("bun:sqlite" as any)) as any
+    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    try {
+      db.query(`
+        UPDATE questions 
+        SET flagged_reason = NULL, 
+            flagged_notes = NULL, 
+            flagged_at = NULL,
+            updated_by_model = 'User Moderator (Resolved)',
+            updated_on_device = 'Local Computer',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(id)
+      return { success: true }
+    } catch (error: any) {
+      console.error("Resolve flag failed:", error)
+      throw new Error("Failed to resolve flag: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+export const resolveQuestionFn = resolveQuestionFnBase as any
+
+const toggleCheckedStatusFnBase = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const { id, status } = ctx.data
+    const { Database } = (await import("bun:sqlite" as any)) as any
+    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    try {
+      db.query(`
+        UPDATE questions 
+        SET checked_status = ?,
+            updated_by_model = 'User Moderator',
+            updated_on_device = 'Local Computer',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(status, id)
+      return { success: true }
+    } catch (error: any) {
+      console.error("Toggle checked status failed:", error)
+      throw new Error("Failed to update checked status: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+export const toggleCheckedStatusFn = toggleCheckedStatusFnBase as any
 
 // TanStack Router definition
 export const Route = createFileRoute("/semua")({
@@ -304,17 +431,51 @@ function HierarchyFolderTree({
 
 function SemuaDashboard() {
   const { questions, stats } = Route.useLoaderData()
+  const router = useRouter()
 
   // State Management
   const [searchTerm, setSearchTerm] = useState("")
   const [activeFilterUrl, setActiveFilterUrl] = useState<string | null>(null)
-  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(
-    null
-  )
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null)
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(
     new Set(["https://ilmiyyah.com"])
   )
-  const [viewTab, setViewTab] = useState<"active" | "deleted">("active")
+  const [viewTab, setViewTab] = useState<"active" | "deleted" | "flagged">("active")
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false)
+  const [isFlagModalOpen, setIsFlagModalOpen] = useState(false)
+  const [flagReason, setFlagReason] = useState("Pertanyaan tidak jelas/bias")
+  const [flagNotes, setFlagNotes] = useState("")
+  const [deleteConfirmId, setDeleteConfirmId] = useState<{ id: number; type: "soft" | "hard"; isInspector?: boolean } | null>(null)
+
+  // Synchronize selectedQuestion with fresh loader data
+  useEffect(() => {
+    if (selectedQuestion) {
+      const fresh = questions.find(q => q.id === selectedQuestion.id)
+      if (fresh) {
+        setSelectedQuestion(fresh)
+      } else {
+        setSelectedQuestion(null)
+      }
+    }
+  }, [questions])
+
+  useEffect(() => {
+    if (!deleteConfirmId) return
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (!target.closest(".delete-popover-container") && !target.closest("button")) {
+        setDeleteConfirmId(null)
+      }
+    }
+    document.addEventListener("click", handleOutsideClick)
+    return () => document.removeEventListener("click", handleOutsideClick)
+  }, [deleteConfirmId])
+
+  const closeInspector = () => {
+    setSelectedQuestion(null)
+    setFlagReason("Pertanyaan tidak jelas/bias")
+    setFlagNotes("")
+  }
 
   // Build the Folder Tree from active breadcrumbs dynamically
   const folderTree = useMemo(() => {
@@ -325,7 +486,11 @@ function SemuaDashboard() {
       isLeaf: false,
     }
 
-    const targetQuestions = questions.filter(q => viewTab === "active" ? !q.deleted_at : !!q.deleted_at)
+    const targetQuestions = questions.filter(q => {
+      if (viewTab === "active") return !q.deleted_at
+      if (viewTab === "deleted") return !!q.deleted_at
+      return !q.deleted_at && !!q.flagged_reason
+    })
 
     for (const q of targetQuestions) {
       let current = root
@@ -362,8 +527,15 @@ function SemuaDashboard() {
   // Filter Questions
   const filteredQuestions = useMemo(() => {
     return questions.filter((q) => {
-      // 0. Soft Delete Filter
-      const matchesTab = viewTab === "active" ? !q.deleted_at : !!q.deleted_at
+      // 0. Soft Delete & Flag Filter
+      let matchesTab = false
+      if (viewTab === "active") {
+        matchesTab = !q.deleted_at
+      } else if (viewTab === "deleted") {
+        matchesTab = !!q.deleted_at
+      } else if (viewTab === "flagged") {
+        matchesTab = !q.deleted_at && !!q.flagged_reason
+      }
       if (!matchesTab) return false
 
       // 1. Search Query Filter
@@ -407,6 +579,14 @@ function SemuaDashboard() {
     }
     return activeFilterUrl
   }, [activeFilterUrl, questions])
+
+  const currentIndex = useMemo(() => {
+    if (!selectedQuestion) return -1
+    return filteredQuestions.findIndex((q) => q.id === selectedQuestion.id)
+  }, [selectedQuestion, filteredQuestions])
+
+  const hasPrevious = currentIndex > 0
+  const hasNext = currentIndex !== -1 && currentIndex < filteredQuestions.length - 1
 
   return (
     <div className="flex min-h-screen flex-col bg-background font-sans text-foreground antialiased">
@@ -454,7 +634,7 @@ function SemuaDashboard() {
               }}
               className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-1.5 text-xs shadow-xs transition-all ${
                 viewTab === "deleted"
-                  ? "border-amber-500/20 bg-amber-500/10 font-semibold text-amber-600 animate-pulse"
+                  ? "border-amber-500/20 bg-amber-500/10 font-semibold text-amber-600"
                   : "border-border bg-card text-card-foreground hover:bg-muted"
               }`}
             >
@@ -462,6 +642,24 @@ function SemuaDashboard() {
               <div>
                 <span className="font-semibold">{stats.totalDeletedQuestions || 0}</span>
                 <span className="ml-1 text-muted-foreground">Sampah</span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                setViewTab("flagged")
+                setActiveFilterUrl(null)
+              }}
+              className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-1.5 text-xs shadow-xs transition-all ${
+                viewTab === "flagged"
+                  ? "border-red-500/20 bg-red-500/10 font-semibold text-red-600"
+                  : "border-border bg-card text-card-foreground hover:bg-muted"
+              }`}
+            >
+              <RiFlagLine className="h-4 w-4 text-red-500" />
+              <div>
+                <span className="font-semibold">{stats.totalFlaggedQuestions || 0}</span>
+                <span className="ml-1 text-muted-foreground">Ditandai (Flag)</span>
               </div>
             </button>
 
@@ -493,72 +691,50 @@ function SemuaDashboard() {
       </header>
 
       {/* Main Grid Workspace */}
-      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-6 md:flex-row">
-        {/* Left Side: Collapsible Category Tree Sidebar */}
-        <aside className="flex w-full shrink-0 flex-col gap-4 md:w-64">
-          <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-xs">
-            <div className="flex items-center justify-between border-b border-border pb-2.5">
-              <span className="flex items-center gap-1.5 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                <RiFolderLine className="h-4 w-4" />
-                Struktur Kajian
-              </span>
-              {activeFilterUrl && (
-                <button
-                  onClick={() => setActiveFilterUrl(null)}
-                  className="rounded bg-muted px-2 py-0.5 text-[10px] text-muted-foreground transition-all hover:bg-muted-foreground/15"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-
-            {/* Tree Root */}
-            <div className="max-h-[350px] space-y-1 overflow-y-auto pr-1 md:max-h-[500px]">
-              <HierarchyFolderTree
-                node={folderTree}
-                activeFilter={activeFilterUrl}
-                onSelectNode={setActiveFilterUrl}
-                expandedNodes={expandedNodes}
-                toggleExpand={toggleExpand}
-              />
-            </div>
-          </div>
-
-          {/* Quick tips card */}
-          <div className="hidden flex-col gap-1.5 rounded-xl border border-border bg-primary/5 p-4 text-primary md:flex">
-            <span className="flex items-center gap-1 text-xs font-semibold">
-              <RiInformationLine className="h-3.5 w-3.5" />
-              Analisis Mandiri
-            </span>
-            <p className="text-[11px] leading-relaxed text-primary/80">
-              Gunakan struktur kajian untuk memfilter soal per silsilah atau
-              sub-materi. Klik breadcrumbs pada baris tabel untuk menavigasi
-              tingkat tertentu.
-            </p>
-          </div>
-        </aside>
-
-        {/* Right Side: Big Table Pane */}
+      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 p-6">
+        {/* Big Table Pane */}
         <main className="flex min-w-0 flex-1 flex-col gap-4">
           {/* Controls Bar */}
           <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-2xs sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1">
-              <RiSearchLine className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Cari kata kunci soal, artikel, opsi, atau penjelasan..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full rounded-lg border border-border bg-background py-1.5 pr-8 pl-9 text-sm text-ellipsis transition-all focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
-              />
-              {searchTerm && (
-                <button
-                  onClick={() => setSearchTerm("")}
-                  className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground transition-all hover:bg-muted"
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center flex-1">
+              <div className="relative flex-1">
+                <RiSearchLine className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Cari kata kunci soal, artikel, opsi, atau penjelasan..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full rounded-lg border border-border bg-background py-1.5 pr-8 pl-9 text-sm text-ellipsis transition-all focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground transition-all hover:bg-muted"
+                  >
+                    <RiCloseLine className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Pilih Silsilah / Materi Button */}
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  onClick={() => setIsFilterModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3.5 py-1.5 text-xs font-semibold text-foreground hover:bg-muted cursor-pointer shadow-3xs"
                 >
-                  <RiCloseLine className="h-3.5 w-3.5" />
-                </button>
-              )}
+                  <RiFolderLine className="h-4 w-4 text-primary shrink-0" />
+                  <span>Pilih Silsilah / Materi</span>
+                </Button>
+
+                {activeFilterUrl && (
+                  <button
+                    onClick={() => setActiveFilterUrl(null)}
+                    className="rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground transition-all hover:bg-muted-foreground/15 cursor-pointer font-medium"
+                  >
+                    Reset Filter
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Active filtering indicator */}
@@ -572,8 +748,6 @@ function SemuaDashboard() {
               </span>
             </div>
           </div>
-
-          {/* Large Data Table */}
           <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-sm">
@@ -591,73 +765,106 @@ function SemuaDashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {filteredQuestions.length > 0 ? (
-                    filteredQuestions.map((q) => (
-                      <tr
-                        key={q.id}
-                        className="group cursor-pointer transition-colors hover:bg-muted/30"
-                        onClick={() => setSelectedQuestion(q)}
-                      >
-                        {/* ID */}
-                        <td className="p-4 text-center font-mono text-xs text-muted-foreground">
-                          {q.id}
-                        </td>
-
-                        {/* Soal */}
-                        <td className="max-w-[250px] p-4">
-                          <div className="flex flex-col gap-1">
-                            <span
-                              className="line-clamp-2 leading-relaxed font-medium text-foreground"
-                              title={q.question_text}
-                            >
-                              {q.question_text}
-                            </span>
-                            <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                              <RiFileList3Line className="h-3 w-3 text-emerald-600" />
-                              <span
-                                className="max-w-[220px] truncate"
-                                title={q.article_title}
-                              >
-                                {q.article_title}
-                              </span>
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Breadcrumbs */}
-                        <td className="vertical-align-middle hidden max-w-[200px] p-4 md:table-cell">
-                          <div className="flex flex-wrap items-center gap-1 overflow-hidden">
-                            {q.breadcrumbs.slice(0, 3).map((crumb, idx) => (
-                              <div
-                                key={idx}
-                                className="flex items-center gap-0.5 text-[10px]"
-                              >
-                                {idx > 0 && (
-                                  <RiArrowRightSLine className="h-2.5 w-2.5 text-muted-foreground/60" />
-                                )}
+                  <AnimatePresence mode="popLayout">
+                    {filteredQuestions.length > 0 ? (
+                      filteredQuestions.map((q) => (
+                        <motion.tr
+                          key={q.id}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, x: -30 }}
+                          transition={{ duration: 0.2 }}
+                          className="group cursor-pointer transition-colors hover:bg-muted/30"
+                          onClick={() => setSelectedQuestion(q)}
+                        >
+                          {/* ID */}
+                          <td className="p-4 text-center font-mono text-xs text-muted-foreground">
+                            <div className="flex flex-col items-center justify-center gap-1">
+                              <span>{q.id}</span>
+                              {q.flagged_reason && (
                                 <span
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setActiveFilterUrl(
-                                      crumb.url === "https://ilmiyyah.com"
-                                        ? null
-                                        : crumb.url
-                                    )
-                                  }}
-                                  className="max-w-[100px] truncate rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary"
-                                  title={crumb.title}
+                                  className="flex items-center gap-0.5 rounded-full bg-red-500/10 px-1.5 py-0.5 text-[9px] font-bold text-red-600 shadow-3xs"
+                                  title={`Masalah: ${q.flagged_reason}`}
                                 >
-                                  {crumb.title}
+                                  <RiFlagFill className="h-2.5 w-2.5 shrink-0" />
+                                  FLG
                                 </span>
-                              </div>
-                            ))}
-                            {q.breadcrumbs.length > 3 && (
-                              <span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
-                                +{q.breadcrumbs.length - 3}
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Soal */}
+                          <td className="max-w-[250px] p-4">
+                            <div className="flex flex-col gap-1">
+                              <span
+                                className="line-clamp-2 leading-relaxed font-medium text-foreground"
+                                title={q.question_text}
+                              >
+                                {q.question_text}
                               </span>
-                            )}
-                          </div>
-                        </td>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                                  <RiFileList3Line className="h-3 w-3 text-emerald-600 shrink-0" />
+                                  <span
+                                    className="max-w-[160px] truncate"
+                                    title={q.article_title}
+                                  >
+                                    {q.article_title}
+                                  </span>
+                                </span>
+                                <button
+                                  onClick={async (e) => {
+                                    e.stopPropagation()
+                                    const newStatus = q.checked_status === 'sudah dicek' ? 'buatan AI' : 'sudah dicek'
+                                    await toggleCheckedStatusFn({ data: { id: q.id, status: newStatus } })
+                                    await router.invalidate()
+                                  }}
+                                  className={`text-[9px] px-1.5 py-0.5 rounded font-semibold select-none cursor-pointer border transition-all duration-150 shrink-0 ${
+                                    q.checked_status === "sudah dicek"
+                                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20"
+                                      : "bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20"
+                                  }`}
+                                >
+                                  {q.checked_status === "sudah dicek" ? "Sudah Dicek" : "Buatan AI"}
+                                </button>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Breadcrumbs */}
+                          <td className="vertical-align-middle hidden max-w-[200px] p-4 md:table-cell">
+                            <div className="flex flex-wrap items-center gap-1 overflow-hidden">
+                              {[...q.breadcrumbs].reverse().slice(0, 3).map((crumb, idx) => (
+                                <div
+                                  key={idx}
+                                  className="flex items-center gap-0.5 text-[10px]"
+                                >
+                                  {idx > 0 && (
+                                    <RiArrowLeftSLine className="h-2.5 w-2.5 text-muted-foreground/60 shrink-0" />
+                                  )}
+                                  <span
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setActiveFilterUrl(
+                                        crumb.url === "https://ilmiyyah.com"
+                                          ? null
+                                          : crumb.url
+                                      )
+                                    }}
+                                    className="max-w-[100px] truncate rounded bg-muted px-1.5 py-0.5 font-medium text-muted-foreground transition-all hover:bg-primary/10 hover:text-primary cursor-pointer"
+                                    title={crumb.title}
+                                  >
+                                    {crumb.title}
+                                  </span>
+                                </div>
+                              ))}
+                              {q.breadcrumbs.length > 3 && (
+                                <span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+                                  +{q.breadcrumbs.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          </td>
 
                         {/* Opsi */}
                         <td className="hidden max-w-[320px] p-4 text-xs lg:table-cell">
@@ -713,20 +920,49 @@ function SemuaDashboard() {
                             </Button>
 
                             {viewTab === "active" ? (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 rounded-lg text-muted-foreground transition-all hover:bg-red-500/10 hover:text-red-600 cursor-pointer"
-                                onClick={async () => {
-                                  if (confirm("Arsipkan/hapus sementara soal ini?")) {
-                                    await softDeleteQuestionFn({ data: q.id })
-                                    window.location.reload()
-                                  }
-                                }}
-                                title="Hapus Sementara"
-                              >
-                                <RiDeleteBinLine className="h-4 w-4" />
-                              </Button>
+                              <div className="relative delete-popover-container inline-block">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 rounded-lg text-muted-foreground transition-all hover:bg-red-500/10 hover:text-red-600 cursor-pointer"
+                                  onClick={() => setDeleteConfirmId({ id: q.id, type: "soft" })}
+                                  title="Hapus Sementara"
+                                >
+                                  <RiDeleteBinLine className="h-4 w-4" />
+                                </Button>
+
+                                {deleteConfirmId?.id === q.id && deleteConfirmId?.type === "soft" && !deleteConfirmId.isInspector && (
+                                  <div className="absolute right-0 bottom-full mb-2 z-50 w-56 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-150">
+                                    <div className="space-y-2 text-left">
+                                      <h4 className="font-semibold text-xs text-foreground">Hapus Sementara?</h4>
+                                      <p className="text-[10px] text-muted-foreground leading-relaxed">
+                                        Soal akan dipindahkan ke tab Sampah dan dapat dipulihkan kapan saja.
+                                      </p>
+                                      <div className="flex justify-end gap-1.5 pt-1">
+                                        <Button
+                                          size="sm"
+                                          variant="ghost"
+                                          className="h-6 text-[10px] px-2 py-0.5"
+                                          onClick={() => setDeleteConfirmId(null)}
+                                        >
+                                          Batal
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          className="h-6 text-[10px] px-2.5 py-0.5 bg-red-600 hover:bg-red-700 text-white font-medium animate-pulse"
+                                          onClick={async () => {
+                                            await softDeleteQuestionFn({ data: q.id })
+                                            setDeleteConfirmId(null)
+                                            await router.invalidate()
+                                          }}
+                                        >
+                                          Hapus
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
                             ) : (
                               <>
                                 <Button
@@ -735,31 +971,64 @@ function SemuaDashboard() {
                                   className="h-7 w-7 rounded-lg text-muted-foreground transition-all hover:bg-emerald-500/10 hover:text-emerald-600 cursor-pointer"
                                   onClick={async () => {
                                     await restoreQuestionFn({ data: q.id })
-                                    window.location.reload()
+                                    await router.invalidate()
                                   }}
                                   title="Pulihkan Soal"
                                 >
                                   <RiHistoryLine className="h-4 w-4" />
                                 </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-7 w-7 rounded-lg text-muted-foreground transition-all hover:bg-red-600/15 hover:text-red-700 cursor-pointer"
-                                  onClick={async () => {
-                                    if (confirm("HAPUS PERMANEN? Tindakan ini tidak bisa dibatalkan.")) {
-                                      await hardDeleteQuestionFn({ data: q.id })
-                                      window.location.reload()
-                                    }
-                                  }}
-                                  title="Hapus Permanen"
-                                >
-                                  <RiCloseLine className="h-4 w-4" />
-                                </Button>
+
+                                <div className="relative delete-popover-container inline-block">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 rounded-lg text-muted-foreground transition-all hover:bg-red-600/15 hover:text-red-700 cursor-pointer"
+                                    onClick={() => setDeleteConfirmId({ id: q.id, type: "hard" })}
+                                    title="Hapus Permanen"
+                                  >
+                                    <RiCloseLine className="h-4 w-4" />
+                                  </Button>
+
+                                  {deleteConfirmId?.id === q.id && deleteConfirmId?.type === "hard" && !deleteConfirmId.isInspector && (
+                                    <div className="absolute right-0 bottom-full mb-2 z-50 w-56 rounded-xl border border-red-500/20 bg-popover p-3 text-popover-foreground shadow-lg animate-in fade-in slide-in-from-bottom-2 duration-150">
+                                      <div className="space-y-2 text-left">
+                                        <h4 className="font-semibold text-xs text-red-600 flex items-center gap-1">
+                                          <RiAlertLine className="h-3.5 w-3.5 animate-bounce" />
+                                          Hapus Permanen?
+                                        </h4>
+                                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                                          Tindakan ini tidak bisa dibatalkan. Soal akan dihapus selamanya.
+                                        </p>
+                                        <div className="flex justify-end gap-1.5 pt-1">
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className="h-6 text-[10px] px-2 py-0.5"
+                                            onClick={() => setDeleteConfirmId(null)}
+                                          >
+                                            Batal
+                                          </Button>
+                                          <Button
+                                            size="sm"
+                                            className="h-6 text-[10px] px-2.5 py-0.5 bg-red-600 hover:bg-red-700 text-white font-medium"
+                                            onClick={async () => {
+                                              await hardDeleteQuestionFn({ data: q.id })
+                                              setDeleteConfirmId(null)
+                                              await router.invalidate()
+                                            }}
+                                          >
+                                            Hapus
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               </>
                             )}
                           </div>
                         </td>
-                      </tr>
+                      </motion.tr>
                     ))
                   ) : (
                     <tr>
@@ -780,22 +1049,23 @@ function SemuaDashboard() {
                       </td>
                     </tr>
                   )}
-                </tbody>
+                </AnimatePresence>
+              </tbody>
               </table>
             </div>
           </div>
         </main>
       </div>
 
-      {/* Slide-over Detailed Question Inspector Drawer/Modal */}
+      {/* Centered Popover Modal Detailed Question Inspector */}
       {selectedQuestion && (
-        <div className="fixed inset-0 z-50 flex items-center justify-end bg-background/60 backdrop-blur-xs select-none">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-xs select-none p-4">
           <div
             className="absolute inset-0 cursor-pointer"
-            onClick={() => setSelectedQuestion(null)}
+            onClick={closeInspector}
           />
 
-          <div className="animate-slideLeft relative flex h-full w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
+          <div className="animate-scaleIn relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
             {/* Drawer Header */}
             <div className="flex items-center justify-between border-b border-border bg-muted/30 p-5">
               <div className="flex items-center gap-2">
@@ -805,7 +1075,7 @@ function SemuaDashboard() {
                 </h3>
               </div>
               <button
-                onClick={() => setSelectedQuestion(null)}
+                onClick={closeInspector}
                 className="rounded-lg p-1.5 text-muted-foreground transition-all hover:bg-muted cursor-pointer"
               >
                 <RiCloseLine className="h-5 w-5" />
@@ -813,7 +1083,16 @@ function SemuaDashboard() {
             </div>
 
             {/* Drawer Content */}
-            <div className="flex-1 space-y-6 overflow-y-auto p-6">
+            <div className="flex-1 overflow-hidden relative">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={selectedQuestion.id}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.15 }}
+                  className="absolute inset-0 overflow-y-auto p-6 space-y-6"
+                >
               {selectedQuestion.deleted_at && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
                   <RiDeleteBinLine className="h-4 w-4 shrink-0 text-amber-600" />
@@ -825,6 +1104,24 @@ function SemuaDashboard() {
                   </div>
                 </div>
               )}
+
+              {selectedQuestion.flagged_reason && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-4 text-xs text-red-700 dark:text-red-400">
+                  <RiFlagFill className="h-4.5 w-4.5 shrink-0 text-red-600 mt-0.5" />
+                  <div className="space-y-1">
+                    <span className="font-semibold text-red-800 dark:text-red-300">Soal ini Ditandai / Bermasalah:</span>
+                    <p className="font-medium">Sebab: {selectedQuestion.flagged_reason}</p>
+                    {selectedQuestion.flagged_notes && (
+                      <p className="mt-1 border-t border-red-500/10 pt-1 text-red-700/80 italic">
+                        Saran/Catatan: &ldquo;{selectedQuestion.flagged_notes}&rdquo;
+                      </p>
+                    )}
+                    <p className="mt-1 text-[9px] text-red-500/70">
+                      Dilaporkan pada: {selectedQuestion.flagged_at ? new Date(selectedQuestion.flagged_at).toLocaleString("id-ID") : "-"}
+                    </p>
+                  </div>
+                </div>
+              )}
               {/* Hierarchy Path / Breadcrumbs trail */}
               <div className="space-y-1.5">
                 <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
@@ -832,12 +1129,22 @@ function SemuaDashboard() {
                   Struktur Materi
                 </span>
                 <div className="flex flex-wrap items-center gap-1 rounded-lg border border-border bg-muted/40 p-2.5 text-xs leading-normal">
-                  {selectedQuestion.breadcrumbs.map((crumb, idx) => (
+                  {[...selectedQuestion.breadcrumbs].reverse().map((crumb, idx) => (
                     <div key={idx} className="flex items-center gap-1">
                       {idx > 0 && (
-                        <RiArrowRightSLine className="h-3 w-3 text-muted-foreground/60" />
+                        <RiArrowLeftSLine className="h-3 w-3 text-muted-foreground/60 shrink-0" />
                       )}
-                      <span className="font-medium text-muted-foreground/90">
+                      <span
+                        onClick={() => {
+                          setActiveFilterUrl(
+                            crumb.url === "https://ilmiyyah.com"
+                              ? null
+                              : crumb.url
+                          )
+                          closeInspector()
+                        }}
+                        className="font-medium text-muted-foreground/90 rounded bg-muted/60 px-1.5 py-0.5 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+                      >
                         {crumb.title}
                       </span>
                     </div>
@@ -953,7 +1260,69 @@ function SemuaDashboard() {
                   </div>
                 </div>
               </div>
-            </div>
+
+              {/* Audit Log & History Panel */}
+              <div className="space-y-2">
+                <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                  <RiHistoryLine className="h-3.5 w-3.5" />
+                  Audit Log & Riwayat Soal
+                </span>
+                <div className="space-y-2 rounded-xl border border-border bg-muted/40 p-4 text-xs">
+                  <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+                    <span className="text-muted-foreground">Status Verifikasi:</span>
+                    <button
+                      onClick={async () => {
+                        const newStatus = selectedQuestion.checked_status === 'sudah dicek' ? 'buatan AI' : 'sudah dicek'
+                        await toggleCheckedStatusFn({ data: { id: selectedQuestion.id, status: newStatus } })
+                        await router.invalidate()
+                      }}
+                      className={`text-[9px] px-2 py-0.5 rounded font-semibold select-none cursor-pointer border transition-all duration-150 shrink-0 ${
+                        selectedQuestion.checked_status === "sudah dicek"
+                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 hover:bg-emerald-500/20"
+                          : "bg-indigo-500/10 text-indigo-600 border-indigo-500/20 hover:bg-indigo-500/20"
+                      }`}
+                    >
+                      {selectedQuestion.checked_status === "sudah dicek" ? "Sudah Dicek" : "Buatan AI"}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+                    <span className="text-muted-foreground">Pembuat (AI Model):</span>
+                    <span className="font-semibold text-foreground flex items-center gap-1">
+                      <RiSparklingLine className="h-3 w-3 text-primary animate-pulse" />
+                      {selectedQuestion.created_by_model || "Gemini 2.5 Flash"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+                    <span className="text-muted-foreground">Perangkat Pembuat:</span>
+                    <span className="font-semibold text-foreground">
+                      {selectedQuestion.created_on_device || "Server-Prod-01"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+                    <span className="text-muted-foreground">Pengubah Terakhir:</span>
+                    <span className="font-semibold text-foreground">
+                      {selectedQuestion.updated_by_model || "-"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-2">
+                    <span className="text-muted-foreground">Perangkat Pengubah:</span>
+                    <span className="font-semibold text-foreground">
+                      {selectedQuestion.updated_on_device || "-"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    <span className="text-muted-foreground">Terakhir Diperbarui:</span>
+                    <span className="font-semibold text-foreground">
+                      {selectedQuestion.updated_at
+                        ? new Date(selectedQuestion.updated_at).toLocaleString("id-ID")
+                        : "-"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
             {/* Drawer Footer */}
             <div className="flex justify-between items-center border-t border-border bg-muted/30 p-4">
@@ -962,45 +1331,360 @@ function SemuaDashboard() {
                   <>
                     <Button
                       onClick={async () => {
+                        const nextQuestion = hasNext
+                          ? filteredQuestions[currentIndex + 1]
+                          : hasPrevious
+                          ? filteredQuestions[currentIndex - 1]
+                          : null
                         await restoreQuestionFn({ data: selectedQuestion.id })
-                        window.location.reload()
+                        await router.invalidate()
+                        if (nextQuestion) {
+                          setSelectedQuestion(nextQuestion)
+                        } else {
+                          closeInspector()
+                        }
                       }}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3.5 py-1.5 font-medium rounded-lg cursor-pointer"
                     >
                       Pulihkan Soal
                     </Button>
-                    <Button
-                      onClick={async () => {
-                        if (confirm("HAPUS PERMANEN? Tindakan ini tidak bisa dibatalkan.")) {
-                          await hardDeleteQuestionFn({ data: selectedQuestion.id })
-                          window.location.reload()
-                        }
-                      }}
-                      className="bg-red-700 hover:bg-red-800 text-white text-xs px-3.5 py-1.5 font-medium rounded-lg cursor-pointer"
-                    >
-                      Hapus Permanen
-                    </Button>
+                    <div className="relative delete-popover-container inline-block">
+                      <Button
+                        onClick={() => setDeleteConfirmId({ id: selectedQuestion.id, type: "hard", isInspector: true })}
+                        className="bg-red-700 hover:bg-red-800 text-white text-xs px-3.5 py-1.5 font-medium rounded-lg cursor-pointer"
+                      >
+                        Hapus Permanen
+                      </Button>
+
+                      {deleteConfirmId?.id === selectedQuestion.id && deleteConfirmId?.type === "hard" && deleteConfirmId.isInspector && (
+                        <div className="absolute left-0 bottom-full mb-2 z-50 w-64 rounded-xl border border-red-500/20 bg-popover p-4 text-popover-foreground shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-150">
+                          <div className="space-y-2 text-left">
+                            <h4 className="font-semibold text-xs text-red-600 flex items-center gap-1.5">
+                              <RiAlertLine className="h-4 w-4 animate-bounce text-red-500" />
+                              Hapus Soal Permanen?
+                            </h4>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">
+                              Tindakan ini tidak bisa dibatalkan. Soal ini akan dihapus selamanya dari database.
+                            </p>
+                            <div className="flex justify-end gap-1.5 pt-1.5">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 text-[10px] px-2 py-0.5"
+                                onClick={() => setDeleteConfirmId(null)}
+                              >
+                                Batal
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-6 text-[10px] px-2.5 py-0.5 bg-red-600 hover:bg-red-700 text-white font-medium"
+                                onClick={async () => {
+                                  const nextQuestion = hasNext
+                                    ? filteredQuestions[currentIndex + 1]
+                                    : hasPrevious
+                                    ? filteredQuestions[currentIndex - 1]
+                                    : null
+                                  await hardDeleteQuestionFn({ data: selectedQuestion.id })
+                                  setDeleteConfirmId(null)
+                                  await router.invalidate()
+                                  if (nextQuestion) {
+                                    setSelectedQuestion(nextQuestion)
+                                  } else {
+                                    closeInspector()
+                                  }
+                                }}
+                              >
+                                Hapus
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </>
                 ) : (
-                  <Button
-                    onClick={async () => {
-                      if (confirm("Arsipkan/hapus sementara soal ini?")) {
-                        await softDeleteQuestionFn({ data: selectedQuestion.id })
-                        window.location.reload()
-                      }
-                    }}
-                    className="bg-red-500/10 hover:bg-red-500/20 text-red-600 text-xs px-3.5 py-1.5 font-medium rounded-lg border border-red-500/20 cursor-pointer"
-                  >
-                    Arsipkan Soal
-                  </Button>
+                  <>
+                    <div className="relative delete-popover-container inline-block">
+                      <Button
+                        onClick={() => setDeleteConfirmId({ id: selectedQuestion.id, type: "soft", isInspector: true })}
+                        className="bg-red-500/10 hover:bg-red-500/20 text-red-600 text-xs px-3.5 py-1.5 font-medium rounded-lg border border-red-500/20 cursor-pointer"
+                      >
+                        Arsipkan Soal
+                      </Button>
+
+                      {deleteConfirmId?.id === selectedQuestion.id && deleteConfirmId?.type === "soft" && deleteConfirmId.isInspector && (
+                        <div className="absolute left-0 bottom-full mb-2 z-50 w-64 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-150">
+                          <div className="space-y-2 text-left">
+                            <h4 className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                              <RiAlertLine className="h-4 w-4 text-red-500" />
+                              Arsipkan Soal?
+                            </h4>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">
+                              Soal akan dipindahkan ke tab Sampah dan dapat dipulihkan kapan saja.
+                            </p>
+                            <div className="flex justify-end gap-1.5 pt-1.5">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 text-[10px] px-2 py-0.5"
+                                onClick={() => setDeleteConfirmId(null)}
+                              >
+                                Batal
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="h-6 text-[10px] px-2.5 py-0.5 bg-red-600 hover:bg-red-700 text-white font-medium animate-pulse"
+                                onClick={async () => {
+                                  const nextQuestion = hasNext
+                                    ? filteredQuestions[currentIndex + 1]
+                                    : hasPrevious
+                                    ? filteredQuestions[currentIndex - 1]
+                                    : null
+                                  await softDeleteQuestionFn({ data: selectedQuestion.id })
+                                  setDeleteConfirmId(null)
+                                  await router.invalidate()
+                                  if (nextQuestion) {
+                                    setSelectedQuestion(nextQuestion)
+                                  } else {
+                                    closeInspector()
+                                  }
+                                }}
+                              >
+                                Arsipkan
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {selectedQuestion.flagged_reason ? (
+                      <Button
+                        onClick={async () => {
+                          if (confirm("Selesaikan bendera masalah untuk soal ini? Soal akan ditandai kembali sebagai normal.")) {
+                            const nextQuestion = hasNext
+                              ? filteredQuestions[currentIndex + 1]
+                              : hasPrevious
+                              ? filteredQuestions[currentIndex - 1]
+                              : null
+                            await resolveQuestionFn({ data: selectedQuestion.id })
+                            await router.invalidate()
+                            if (nextQuestion) {
+                              setSelectedQuestion(nextQuestion)
+                            } else {
+                              closeInspector()
+                            }
+                          }
+                        }}
+                        className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 text-xs px-3.5 py-1.5 font-medium rounded-lg border border-emerald-500/20 cursor-pointer"
+                      >
+                        Selesaikan Masalah
+                      </Button>
+                    ) : (
+                      <Button
+                        onClick={() => setIsFlagModalOpen(true)}
+                        className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 text-xs px-3.5 py-1.5 font-medium rounded-lg border border-amber-500/20 cursor-pointer"
+                      >
+                        Tandai Masalah
+                      </Button>
+                    )}
+                  </>
                 )}
               </div>
 
-              <Button
-                onClick={() => setSelectedQuestion(null)}
-                className="bg-primary px-4 text-xs font-medium text-primary-foreground hover:bg-primary/95 cursor-pointer"
+              <div className="flex gap-2">
+                <Button
+                  disabled={!hasPrevious}
+                  onClick={() => setSelectedQuestion(filteredQuestions[currentIndex - 1])}
+                  className="bg-muted border border-border hover:bg-muted-foreground/10 text-foreground text-xs px-3.5 py-1.5 font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-3xs"
+                >
+                  Sebelumnya
+                </Button>
+                <Button
+                  disabled={!hasNext}
+                  onClick={() => setSelectedQuestion(filteredQuestions[currentIndex + 1])}
+                  className="bg-primary text-primary-foreground hover:bg-primary/95 text-xs px-3.5 py-1.5 font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-3xs"
+                >
+                  Selanjutnya
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Category Filter Modal */}
+      {isFilterModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-xs select-none">
+          <div
+            className="absolute inset-0 cursor-pointer"
+            onClick={() => setIsFilterModalOpen(false)}
+          />
+          <div className="animate-scaleIn relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-border bg-muted/30 p-5">
+              <div className="flex items-center gap-2">
+                <RiFolderLine className="h-5 w-5 text-primary" />
+                <h3 className="text-sm font-semibold text-foreground">
+                  Pilih Silsilah / Materi Kajian
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsFilterModalOpen(false)}
+                className="rounded-lg p-1.5 text-muted-foreground transition-all hover:bg-muted cursor-pointer"
               >
-                Selesai
+                <RiCloseLine className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Pilih silsilah materi untuk menyaring soal evaluasi di bawah. Klik ikon panah untuk memperluas bab.
+              </p>
+              
+              <div className="rounded-lg border border-border bg-background/50 p-3 max-h-[50vh] overflow-y-auto">
+                <HierarchyFolderTree
+                  node={folderTree}
+                  activeFilter={activeFilterUrl}
+                  onSelectNode={(url) => {
+                    setActiveFilterUrl(url)
+                    setIsFilterModalOpen(false)
+                  }}
+                  expandedNodes={expandedNodes}
+                  toggleExpand={toggleExpand}
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-between items-center border-t border-border bg-muted/30 p-4">
+              {activeFilterUrl ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setActiveFilterUrl(null)
+                    setIsFilterModalOpen(false)
+                  }}
+                  className="text-xs text-red-600 hover:text-red-700 hover:bg-red-500/10 cursor-pointer"
+                >
+                  Reset Filter
+                </Button>
+              ) : (
+                <div />
+              )}
+              <Button
+                onClick={() => setIsFilterModalOpen(false)}
+                className="bg-primary text-primary-foreground hover:bg-primary/95 text-xs px-4 py-1.5 rounded-lg cursor-pointer"
+              >
+                Tutup
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Standalone Tandai Masalah Modal */}
+      {isFlagModalOpen && selectedQuestion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/60 backdrop-blur-xs select-none">
+          <div
+            className="absolute inset-0 cursor-pointer"
+            onClick={() => setIsFlagModalOpen(false)}
+          />
+          <div className="animate-scaleIn relative flex max-h-[85vh] w-full max-w-md flex-col rounded-xl border border-border bg-card shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-border bg-muted/30 p-5">
+              <div className="flex items-center gap-2">
+                <RiFlagLine className="h-5 w-5 text-red-600 animate-pulse" />
+                <h3 className="text-sm font-semibold text-foreground">
+                  Tandai Masalah (Soal #{selectedQuestion.id})
+                </h3>
+              </div>
+              <button
+                onClick={() => setIsFlagModalOpen(false)}
+                className="rounded-lg p-1.5 text-muted-foreground transition-all hover:bg-muted cursor-pointer"
+              >
+                <RiCloseLine className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <div className="rounded-lg border border-red-500/10 bg-red-500/5 p-3 text-xs text-red-700 dark:text-red-400 leading-relaxed font-medium">
+                Soal: &ldquo;{selectedQuestion.question_text}&rdquo;
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase block">
+                  Kategori Masalah
+                </label>
+                <div className="grid grid-cols-1 gap-2 text-xs">
+                  {[
+                    "Pertanyaan tidak jelas/bias",
+                    "Jawaban Salah",
+                    "Pilihan Jawaban Salah ada yang juga benar",
+                    "Keterangan tidak ada hubungannya",
+                    "Keterangan tidak ada di artikel",
+                    "Lainnya"
+                  ].map((reason) => (
+                    <label key={reason} className="flex items-center gap-2 cursor-pointer rounded-lg border border-border bg-card p-2 hover:bg-muted/40 transition-colors">
+                      <input
+                        type="radio"
+                        name="flag_reason_modal"
+                        checked={flagReason === reason}
+                        onChange={() => setFlagReason(reason)}
+                        className="text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer"
+                      />
+                      <span className="text-foreground">{reason}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase block">
+                  Catatan Perbaikan / Saran Lainnya
+                </label>
+                <textarea
+                  value={flagNotes}
+                  onChange={(e) => setFlagNotes(e.target.value)}
+                  placeholder="Tuliskan detail perbaikan atau saran Anda di sini..."
+                  className="w-full min-h-[80px] rounded-lg border border-border bg-background p-3 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none text-foreground"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end gap-2 border-t border-border bg-muted/30 p-4">
+              <Button
+                variant="ghost"
+                onClick={() => setIsFlagModalOpen(false)}
+                className="h-8 text-xs cursor-pointer"
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={async () => {
+                  await flagQuestionFn({
+                    data: {
+                      id: selectedQuestion.id,
+                      reason: flagReason,
+                      notes: flagNotes
+                    }
+                  })
+                  setFlagNotes("")
+                  await router.invalidate()
+                  
+                  if (hasNext) {
+                    setSelectedQuestion(filteredQuestions[currentIndex + 1])
+                  } else {
+                    setIsFlagModalOpen(false)
+                    closeInspector()
+                  }
+                }}
+                className="h-8 bg-red-600 hover:bg-red-700 text-white text-xs px-4 rounded-lg font-medium cursor-pointer"
+              >
+                Kirim Laporan
               </Button>
             </div>
           </div>

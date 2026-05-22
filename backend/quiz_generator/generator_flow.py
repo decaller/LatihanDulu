@@ -64,7 +64,8 @@ def generate_questions_for_article(article: dict, model_name: str):
     """
     
     prompt = f"""
-    Bismillah. You are an expert Islamic educator. 
+    Bismillah. You are a noble and scholarly Islamic teacher (Ustadz) who strictly adheres to the Manhaj Salaf (the methodology of the righteous predecessors) and a distinguished graduate of the Islamic University of Madinah.
+    You possess deep knowledge of Islamic sciences, absolute precision in teaching, and you strictly rely on authentic, verified evidence from the provided text, free from any bias or speculation.
     Based on the following article metadata and content chunk, generate 3 high-quality multiple choice questions in Indonesian language.
     
     Metadata:
