@@ -18,7 +18,7 @@ import {
   RiBook3Line,
   RiRefreshLine,
   RiFlagLine,
-  RiFlagFill,
+  RiExternalLinkLine,
 } from "@remixicon/react"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -181,7 +181,8 @@ function UserQuizApp() {
   const [selectedArticleId, setSelectedArticleId] = useState<number | null>(null)
   
   // Quiz Flow States
-  const [quizState, setQuizState] = useState<"idle" | "quiz" | "interstitial" | "summary">("idle")
+  const [quizState, setQuizState] = useState<"idle" | "pre-start" | "quiz" | "interstitial" | "summary">("idle")
+  const [showArticleIframe, setShowArticleIframe] = useState(true)
   const [quizPool, setQuizPool] = useState<{ verified: Question[]; ai: Question[] }>({ verified: [], ai: [] })
   const [quizType, setQuizType] = useState<"verified" | "ai">("verified")
   const [currentQuestions, setCurrentQuestions] = useState<Question[]>([])
@@ -240,6 +241,17 @@ function UserQuizApp() {
     if (selectedArticleId === null) return null
     return articles.find((a) => a.id === selectedArticleId) || null
   }, [selectedArticleId, articles])
+
+  // Breadcrumbs for selected article
+  const breadcrumbs = useMemo(() => {
+    const activePool = quizPool.verified.length > 0 ? quizPool.verified : quizPool.ai
+    return activePool[0]?.breadcrumbs || []
+  }, [quizPool])
+
+  const isSplitScreen =
+    (quizState === "quiz" || quizState === "pre-start") &&
+    showArticleIframe &&
+    !!selectedArticle?.url
 
   // Map out parent-child folders client side
   const folderTree = useMemo(() => {
@@ -335,11 +347,16 @@ function UserQuizApp() {
     return nextArticleMap[selectedArticleId] || null
   }, [selectedArticleId, nextArticleMap])
 
-  // Initializing quiz for selected article
-  const startQuiz = (articleId: number) => {
+  // Select article and transition to pre-start screen
+  const selectArticle = (articleId: number) => {
     const pool = questions.filter((q) => q.article_id === articleId)
     const verified = pool.filter((q) => q.checked_status === "sudah dicek")
     const ai = pool.filter((q) => q.checked_status === "buatan AI")
+
+    if (verified.length === 0 && ai.length === 0) {
+      alert("MasyaAllah, belum ada soal aktif untuk materi ini.")
+      return
+    }
 
     setQuizPool({ verified, ai })
     setSelectedArticleId(articleId)
@@ -347,18 +364,25 @@ function UserQuizApp() {
     setCurrentQuestionIndex(0)
     setIsAnswerChecked(false)
     setSelectedOption(null)
+    setQuizState("pre-start")
+  }
 
-    if (verified.length > 0) {
-      setQuizType("verified")
-      setCurrentQuestions(verified)
-      setQuizState("quiz")
-    } else if (ai.length > 0) {
+  // Start the actual quiz
+  const startQuiz = (type: "verified" | "ai") => {
+    const pool = type === "verified" ? quizPool.verified : quizPool.ai
+    if (pool.length === 0) return
+
+    setQuizType(type)
+    setCurrentQuestions(pool)
+    setCurrentQuestionIndex(0)
+    setIsAnswerChecked(false)
+    setSelectedOption(null)
+
+    if (type === "ai" && quizPool.verified.length === 0) {
       // No verified questions. Go to interstitial first to warn the user
-      setQuizType("ai")
-      setCurrentQuestions(ai)
       setQuizState("interstitial")
     } else {
-      alert("MasyaAllah, belum ada soal aktif untuk materi ini.")
+      setQuizState("quiz")
     }
   }
 
@@ -442,10 +466,96 @@ function UserQuizApp() {
   }, [completedArticles])
 
   return (
-    <div className="min-h-screen bg-background font-sans text-foreground antialiased flex flex-col items-center">
-      {/* Outer container responsive for both Mobile and Web */}
-      <div className="w-full max-w-2xl lg:max-w-3xl min-h-screen bg-card flex flex-col shadow-lg border-x border-border/30 relative transition-all duration-300">
-        <AnimatePresence mode="wait">
+    <div className="min-h-screen bg-background font-sans text-foreground antialiased flex flex-col items-center justify-center p-0 lg:p-4 transition-all duration-300">
+      
+      {/* Outer wrapper that adjusts based on split-screen status */}
+      <div
+        className={`w-full transition-all duration-500 flex flex-col lg:flex-row gap-6 items-stretch ${
+          isSplitScreen
+            ? "max-w-full lg:max-w-[95vw] xl:max-w-7xl px-4 lg:px-0"
+            : "max-w-2xl lg:max-w-3xl"
+        }`}
+      >
+        
+        {/* Left Pane: Article Iframe (Only visible on wide screens when split is active) */}
+        {isSplitScreen && (
+          <div className="hidden lg:flex lg:w-[58%] flex-col bg-card border border-border/50 rounded-2xl shadow-xl overflow-hidden relative h-[calc(100vh-4rem)] min-h-[600px] sticky top-8">
+            {/* Header / Top bar of the Iframe browser view */}
+            <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4.5 py-3 select-none">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-6.5 w-6.5 rounded-lg bg-primary/10 border border-primary/20 text-primary flex items-center justify-center shrink-0">
+                  <RiBook3Line className="h-3.5 w-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-xs font-bold text-foreground truncate max-w-[250px] xl:max-w-[400px]">
+                    {selectedArticle?.title}
+                  </h3>
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    Sumber: ilmiyyah.com
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Button
+                  variant="ghost"
+                  onClick={() => window.open(selectedArticle.url, "_blank")}
+                  className="h-7 px-2.5 text-[10px] font-bold text-muted-foreground hover:text-foreground hover:bg-muted rounded-md flex items-center gap-1 cursor-pointer"
+                  title="Buka di Tab Baru"
+                >
+                  <RiExternalLinkLine className="h-3.5 w-3.5" />
+                  <span>Tab Baru</span>
+                </Button>
+                
+                <button
+                  onClick={() => {
+                    const iframe = document.getElementById("article-iframe") as HTMLIFrameElement
+                    if (iframe) iframe.src = selectedArticle.url
+                  }}
+                  className="p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-all cursor-pointer"
+                  title="Muat Ulang Artikel"
+                >
+                  <RiRefreshLine className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+            
+            {/* Direct Link Info overlay for fallback */}
+            <div className="bg-amber-500/5 border-b border-amber-500/10 px-4 py-2 text-[10px] text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
+              <span>Jika artikel di bawah tidak muncul, situs sumber membatasi penyematan iframe.</span>
+              <a
+                href={selectedArticle.url}
+                target="_blank"
+                rel="noreferrer"
+                className="font-bold underline shrink-0 hover:text-amber-950 dark:hover:text-amber-100 flex items-center gap-0.5"
+              >
+                Buka Artikel <RiExternalLinkLine className="h-2.5 w-2.5" />
+              </a>
+            </div>
+
+            {/* Actual Iframe */}
+            <div className="flex-1 bg-white relative">
+              <iframe
+                id="article-iframe"
+                src={selectedArticle.url}
+                className="w-full h-full border-0"
+                title={selectedArticle.title}
+                sandbox="allow-same-origin allow-scripts allow-popups"
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Right Pane or Main container (Interactive quiz or main list) */}
+        <div
+          className={`w-full bg-card flex flex-col shadow-lg border border-border/30 relative transition-all duration-300 ${
+            isSplitScreen
+              ? "lg:w-[42%] lg:rounded-2xl lg:h-[calc(100vh-4rem)] lg:min-h-[600px] lg:sticky lg:top-8"
+              : "min-h-screen lg:rounded-2xl lg:min-h-[90vh] lg:my-8"
+          }`}
+        >
+          <div className={`flex-1 flex flex-col overflow-y-auto custom-scrollbar ${isSplitScreen ? 'h-full' : ''}`}>
+            <AnimatePresence mode="wait">
           
           {/* 1. IDLE STATE: Beranda & Pemilihan Materi */}
           {quizState === "idle" && (
@@ -528,7 +638,7 @@ function UserQuizApp() {
                             initial={{ opacity: 0, y: 5 }}
                             animate={{ opacity: 1, y: 0 }}
                             className="bg-card border border-border/80 hover:border-primary/40 rounded-xl p-4 cursor-pointer active:scale-[0.99] transition-all shadow-3xs flex flex-col gap-2 relative overflow-hidden"
-                            onClick={() => startQuiz(article.id)}
+                            onClick={() => selectArticle(article.id)}
                           >
                             {/* Solved checkmark */}
                             {solved && (
@@ -584,13 +694,169 @@ function UserQuizApp() {
                         node={childNode}
                         expandedNodes={expandedNodes}
                         toggleExpand={toggleExpand}
-                        onSelectArticle={startQuiz}
+                        onSelectArticle={selectArticle}
                         searchTerm={searchTerm}
                       />
                     ))}
                   </div>
                 </div>
               )}
+            </motion.div>
+          )}
+
+          {/* 1b. PRE-START STATE: Menu & Preview Artikel Sebelum Kuis */}
+          {quizState === "pre-start" && (
+            <motion.div
+              key="pre-start"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="flex-1 flex flex-col p-5 pb-8 animate-in fade-in duration-200"
+            >
+              {/* Header Info */}
+              <div className="flex items-center justify-between mb-6">
+                <button
+                  onClick={exitQuiz}
+                  className="flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground cursor-pointer active:scale-95 transition-all"
+                >
+                  <RiArrowLeftLine className="h-4 w-4" /> Kembali
+                </button>
+
+                <div className="flex items-center gap-1.5">
+                  {selectedArticle?.url && (
+                    <button
+                      onClick={() => setShowArticleIframe(!showArticleIframe)}
+                      className={`hidden lg:flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                        showArticleIframe
+                          ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+                          : "bg-muted text-muted-foreground border-border/80 hover:bg-muted-foreground/10 hover:text-foreground"
+                      }`}
+                      title={showArticleIframe ? "Sembunyikan Artikel" : "Tampilkan Artikel"}
+                    >
+                      <RiBook3Line className="h-3.5 w-3.5" />
+                      <span>{showArticleIframe ? "Tutup Artikel" : "Baca Artikel"}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Breadcrumbs trail */}
+              {breadcrumbs.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1 text-[10px] font-bold tracking-wide uppercase text-primary mb-2 select-none">
+                  {breadcrumbs.map((crumb, idx) => (
+                    <span key={idx} className="flex items-center gap-1">
+                      {idx > 0 && <RiArrowRightSLine className="h-3.5 w-3.5 text-muted-foreground/50" />}
+                      <span className="truncate max-w-[120px]">{crumb.title}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Title & Speaker */}
+              <h2 className="text-lg font-extrabold text-foreground leading-snug mb-1">
+                {selectedArticle?.title}
+              </h2>
+              <p className="text-xs text-muted-foreground mb-6">
+                Pemateri: <strong className="text-foreground">{selectedArticle?.speaker || "Ustadz"}</strong>
+              </p>
+
+              {/* Question Count Stats */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-2xl p-4 flex flex-col justify-between shadow-3xs">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-[9px] font-extrabold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-100/50 dark:border-emerald-900/30">
+                      Terverifikasi
+                    </span>
+                    <RiCheckLine className="h-4.5 w-4.5 text-emerald-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-emerald-700 dark:text-emerald-400">
+                      {quizPool.verified.length}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">
+                      Soal telah ditelaah & diverifikasi syar'i.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-amber-500/5 border border-amber-500/10 rounded-2xl p-4 flex flex-col justify-between shadow-3xs">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="text-[9px] font-extrabold text-amber-700 dark:text-amber-400 uppercase tracking-wider bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-100/50 dark:border-amber-900/30">
+                      Buatan AI
+                    </span>
+                    <RiSparklingLine className="h-4.5 w-4.5 text-amber-500" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-black text-amber-700 dark:text-amber-400">
+                      {quizPool.ai.length}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-normal">
+                      Soal digenerasi otomatis untuk penguatan.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Study Advice Info Card */}
+              <div className="rounded-xl bg-muted/40 p-4 border border-border/50 text-xs leading-relaxed text-muted-foreground mb-6">
+                <h4 className="font-bold text-foreground mb-1 flex items-center gap-1.5">
+                  <RiInformationLine className="h-4 w-4 text-primary" /> Petunjuk Belajar
+                </h4>
+                <p>
+                  Sangat dianjurkan untuk membaca materi kajian terlebih dahulu sebelum memulai kuis agar hasil latihan maksimal. Anda dapat menampilkan artikel di sebelah kuis (untuk layar lebar) atau membukanya di tab baru.
+                </p>
+              </div>
+
+              {/* Action Buttons Menu */}
+              <div className="space-y-3 mt-auto">
+                <div className="flex flex-col sm:flex-row gap-3">
+                  {quizPool.verified.length > 0 && (
+                    <Button
+                      onClick={() => startQuiz("verified")}
+                      className="flex-1 py-6 text-xs font-bold bg-primary hover:bg-primary/95 text-white rounded-xl shadow-md cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-1"
+                    >
+                      <span>Mulai Soal Terverifikasi</span>
+                      <RiArrowRightLine className="h-4 w-4" />
+                    </Button>
+                  )}
+
+                  {quizPool.ai.length > 0 && (
+                    <Button
+                      onClick={() => startQuiz("ai")}
+                      className={`flex-1 py-6 text-xs font-bold rounded-xl shadow-md cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-1 ${
+                        quizPool.verified.length > 0
+                          ? "bg-card border border-border hover:bg-muted text-foreground"
+                          : "bg-primary hover:bg-primary/95 text-white"
+                      }`}
+                    >
+                      <span>Mulai Soal AI</span>
+                      <RiSparklingLine className="h-4 w-4 text-amber-500" />
+                    </Button>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                  {selectedArticle?.url && (
+                    <Button
+                      variant="outline"
+                      onClick={() => window.open(selectedArticle.url, "_blank")}
+                      className="flex-1 py-5 text-[11px] font-bold border border-border hover:bg-muted text-foreground rounded-xl flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <RiExternalLinkLine className="h-3.5 w-3.5" />
+                      <span>Buka Artikel di Tab Baru</span>
+                    </Button>
+                  )}
+
+                  <Button
+                    variant="ghost"
+                    onClick={exitQuiz}
+                    className="flex-1 py-5 text-[11px] font-bold hover:bg-muted text-muted-foreground rounded-xl flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <RiArrowLeftLine className="h-3.5 w-3.5" />
+                    <span>Kembali ke Menu</span>
+                  </Button>
+                </div>
+              </div>
             </motion.div>
           )}
 
@@ -613,6 +879,21 @@ function UserQuizApp() {
                 </button>
 
                 <div className="flex items-center gap-1.5">
+                  {selectedArticle?.url && (
+                    <button
+                      onClick={() => setShowArticleIframe(!showArticleIframe)}
+                      className={`hidden lg:flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                        showArticleIframe
+                          ? "bg-primary/10 text-primary border-primary/20 hover:bg-primary/20"
+                          : "bg-muted text-muted-foreground border-border/80 hover:bg-muted-foreground/10 hover:text-foreground"
+                      }`}
+                      title={showArticleIframe ? "Sembunyikan Artikel" : "Tampilkan Artikel"}
+                    >
+                      <RiBook3Line className="h-3.5 w-3.5" />
+                      <span>{showArticleIframe ? "Tutup Artikel" : "Baca Artikel"}</span>
+                    </button>
+                  )}
+
                   <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${
                     quizType === "verified"
                       ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
@@ -921,7 +1202,7 @@ function UserQuizApp() {
                       {nextArticleSibling.title}
                     </h4>
                     <Button
-                      onClick={() => startQuiz(nextArticleSibling.id)}
+                      onClick={() => selectArticle(nextArticleSibling.id)}
                       className="w-full py-5 text-xs font-bold bg-primary hover:bg-primary/95 text-white rounded-xl shadow-sm cursor-pointer transition-all active:scale-[0.98] flex items-center justify-center gap-1"
                     >
                       <span>Mulai Materi Selanjutnya</span>
@@ -946,7 +1227,9 @@ function UserQuizApp() {
             </motion.div>
           )}
 
-        </AnimatePresence>
+            </AnimatePresence>
+          </div>
+        </div>
       </div>
 
       {/* Flag Question Modal */}
