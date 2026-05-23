@@ -16,3 +16,19 @@ services:
     environment:
       - NODE_ENV=production
       - DB_PATH=backend/data.db
+
+  prefect-server:
+    image: prefecthq/prefect:3-python3.11
+    container_name: latihandulu-prefect
+    restart: unless-stopped
+    environment:
+      - PREFECT_API_URL=http://100.103.101.49:4200/api
+      - PREFECT_UI_API_URL=/api
+    command: prefect server start --host 0.0.0.0 --port 4200
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect_data:/root/.prefect
+
+volumes:
+  prefect_data:

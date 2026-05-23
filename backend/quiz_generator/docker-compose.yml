@@ -11,4 +11,5 @@ services:
       - OLLAMA_URL=http://100.121.116.17:11434
       - DB_PATH=/app/data.db
       - DEFAULT_MODEL=llama3.1:latest
+      - PREFECT_API_URL=http://100.103.101.49:4200/api
     network_mode: "host"

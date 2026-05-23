@@ -1,5 +1,4 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router"
-import { createServerFn } from "@tanstack/react-start"
 import { useState, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import {
@@ -25,8 +24,24 @@ import {
 } from "@remixicon/react"
 import { motion, AnimatePresence } from "framer-motion"
 
+import {
+  getQuizDataFn as _getQuizDataFn,
+  softDeleteQuestionFn as _softDeleteQuestionFn,
+  restoreQuestionFn as _restoreQuestionFn,
+  hardDeleteQuestionFn as _hardDeleteQuestionFn,
+  flagQuestionFn as _flagQuestionFn,
+  resolveQuestionFn as _resolveQuestionFn,
+  toggleCheckedStatusFn as _toggleCheckedStatusFn,
+} from "../lib/moderation.server"
 
-// TypeScript Interfaces
+const getQuizDataFn = _getQuizDataFn as any
+const softDeleteQuestionFn = _softDeleteQuestionFn as any
+const restoreQuestionFn = _restoreQuestionFn as any
+const hardDeleteQuestionFn = _hardDeleteQuestionFn as any
+const flagQuestionFn = _flagQuestionFn as any
+const resolveQuestionFn = _resolveQuestionFn as any
+const toggleCheckedStatusFn = _toggleCheckedStatusFn as any
+
 interface Question {
   id: number
   article_id: number
@@ -62,307 +77,6 @@ interface HierarchyNode {
   isLeaf: boolean
   articleId?: number
 }
-
-// Server-Side Data Fetching using Bun's Native Fast SQLite
-export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
-  async () => {
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-
-    try {
-      // 1. Fetch questions joined with article info
-      const rawQuestions = db
-        .query(
-          `
-      SELECT 
-        q.id,
-        q.article_id,
-        q.question_text,
-        q.option_a,
-        q.option_b,
-        q.option_c,
-        q.option_d,
-        q.correct_option,
-        q.explanation,
-        q.deleted_at,
-        q.flagged_reason,
-        q.flagged_notes,
-        q.flagged_at,
-        q.created_by_model,
-        q.created_on_device,
-        q.updated_by_model,
-        q.updated_on_device,
-        q.updated_at,
-        q.checked_status,
-        q.reference_snippet,
-        a.title AS article_title,
-        a.url AS article_url,
-        a.silsilah AS article_silsilah,
-        a.speaker AS article_speaker
-      FROM questions q
-      JOIN articles a ON q.article_id = a.id
-    `
-        )
-        .all() as any[]
-
-      // 2. Fetch hierarchy maps for breadcrumbs resolution
-      const hierarchyRows = db
-        .query("SELECT parent_url, child_url, title FROM hierarchy")
-        .all() as any[]
-      const articleRows = db
-        .query("SELECT id, url, title FROM articles")
-        .all() as any[]
-
-      // Normalize URLs to avoid trailing slash discrepancies
-      const childToParentMap = new Map<
-        string,
-        { parent_url: string; title: string }
-      >()
-      for (const row of hierarchyRows) {
-        if (row.child_url) {
-          childToParentMap.set(row.child_url.trim().replace(/\/$/, ""), {
-            parent_url: row.parent_url.trim().replace(/\/$/, ""),
-            title: row.title,
-          })
-        }
-      }
-
-      const articleUrlToTitleMap = new Map<string, string>()
-      for (const row of articleRows) {
-        if (row.url) {
-          articleUrlToTitleMap.set(row.url.trim().replace(/\/$/, ""), row.title)
-        }
-      }
-
-      // Trace breadcrumb trail recursively up to root
-      const getBreadcrumbs = (url: string) => {
-        const crumbs: { title: string; url: string }[] = []
-        let currentUrl = url.trim().replace(/\/$/, "")
-        const visited = new Set<string>()
-
-        while (currentUrl && !visited.has(currentUrl)) {
-          visited.add(currentUrl)
-          const parentInfo = childToParentMap.get(currentUrl)
-          if (!parentInfo) {
-            const title = articleUrlToTitleMap.get(currentUrl) || currentUrl
-            crumbs.unshift({ title, url: currentUrl })
-            break
-          }
-          crumbs.unshift({
-            title:
-              parentInfo.title ||
-              articleUrlToTitleMap.get(currentUrl) ||
-              currentUrl,
-            url: currentUrl,
-          })
-          currentUrl = parentInfo.parent_url
-        }
-
-        crumbs.unshift({ title: "Mulai (Root)", url: "https://ilmiyyah.com" })
-        return crumbs
-      }
-
-      const questions: Question[] = rawQuestions.map((q) => ({
-        ...q,
-        deleted_at: q.deleted_at === 'NULL' || !q.deleted_at ? null : q.deleted_at,
-        flagged_reason: q.flagged_reason === 'NULL' || !q.flagged_reason ? null : q.flagged_reason,
-        flagged_notes: q.flagged_notes === 'NULL' || !q.flagged_notes ? null : q.flagged_notes,
-        flagged_at: q.flagged_at === 'NULL' || !q.flagged_at ? null : q.flagged_at,
-        created_by_model: q.created_by_model === 'NULL' || !q.created_by_model ? 'Gemini 2.5 Flash' : q.created_by_model,
-        created_on_device: q.created_on_device === 'NULL' || !q.created_on_device ? 'Server-Prod-01' : q.created_on_device,
-        updated_by_model: q.updated_by_model === 'NULL' || !q.updated_by_model ? null : q.updated_by_model,
-        updated_on_device: q.updated_on_device === 'NULL' || !q.updated_on_device ? null : q.updated_on_device,
-        updated_at: q.updated_at === 'NULL' || !q.updated_at ? null : q.updated_at,
-        checked_status: q.checked_status === 'NULL' || !q.checked_status ? 'buatan AI' : q.checked_status,
-        reference_snippet: q.reference_snippet === 'NULL' || !q.reference_snippet ? null : q.reference_snippet,
-        breadcrumbs: getBreadcrumbs(q.article_url),
-      }))
-
-      const activeQuestions = questions.filter(q => !q.deleted_at)
-      const deletedQuestions = questions.filter(q => q.deleted_at)
-
-      return {
-        questions,
-        stats: {
-          totalQuestions: activeQuestions.length,
-          totalDeletedQuestions: deletedQuestions.length,
-          totalFlaggedQuestions: activeQuestions.filter(q => q.flagged_reason).length,
-          totalArticlesWithQuestions: new Set(
-            activeQuestions.map((q) => q.article_id)
-          ).size,
-          totalDatabaseArticles: articleRows.length,
-        },
-      }
-    } catch (error: any) {
-      console.error("Database query failed:", error)
-      throw new Error("Failed to load database: " + error.message)
-    } finally {
-      db.close()
-    }
-  }
-)
-
-const softDeleteQuestionFnBase = createServerFn({ method: "POST" })
-  .handler(async (ctx: any) => {
-    const id = ctx.data
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-    try {
-      db.query(`
-        UPDATE questions 
-        SET deleted_at = CURRENT_TIMESTAMP,
-            updated_by_model = 'User Moderator (Soft Deleted)',
-            updated_on_device = 'Local Computer',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(id)
-      return { success: true }
-    } catch (error: any) {
-      console.error("Soft delete failed:", error)
-      throw new Error("Failed to soft delete question: " + error.message)
-    } finally {
-      db.close()
-    }
-  })
-export const softDeleteQuestionFn = softDeleteQuestionFnBase as any
-
-const restoreQuestionFnBase = createServerFn({ method: "POST" })
-  .handler(async (ctx: any) => {
-    const id = ctx.data
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-    try {
-      db.query(`
-        UPDATE questions 
-        SET deleted_at = NULL,
-            updated_by_model = 'User Moderator (Restored)',
-            updated_on_device = 'Local Computer',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(id)
-      return { success: true }
-    } catch (error: any) {
-      console.error("Restore failed:", error)
-      throw new Error("Failed to restore question: " + error.message)
-    } finally {
-      db.close()
-    }
-  })
-export const restoreQuestionFn = restoreQuestionFnBase as any
-
-const hardDeleteQuestionFnBase = createServerFn({ method: "POST" })
-  .handler(async (ctx: any) => {
-    const id = ctx.data
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-    try {
-      db.query("DELETE FROM questions WHERE id = ?").run(id)
-      return { success: true }
-    } catch (error: any) {
-      console.error("Hard delete failed:", error)
-      throw new Error("Failed to permanently delete question: " + error.message)
-    } finally {
-      db.close()
-    }
-  })
-export const hardDeleteQuestionFn = hardDeleteQuestionFnBase as any
-
-const flagQuestionFnBase = createServerFn({ method: "POST" })
-  .handler(async (ctx: any) => {
-    const { id, reason, notes } = ctx.data
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-    try {
-      db.query(`
-        UPDATE questions 
-        SET flagged_reason = ?, 
-            flagged_notes = ?, 
-            flagged_at = CURRENT_TIMESTAMP,
-            updated_by_model = 'User Moderator',
-            updated_on_device = 'Local Computer',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(reason, notes, id)
-      return { success: true }
-    } catch (error: any) {
-      console.error("Flag question failed:", error)
-      throw new Error("Failed to flag question: " + error.message)
-    } finally {
-      db.close()
-    }
-  })
-export const flagQuestionFn = flagQuestionFnBase as any
-
-const resolveQuestionFnBase = createServerFn({ method: "POST" })
-  .handler(async (ctx: any) => {
-    const id = ctx.data
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-    try {
-      db.query(`
-        UPDATE questions 
-        SET flagged_reason = NULL, 
-            flagged_notes = NULL, 
-            flagged_at = NULL,
-            updated_by_model = 'User Moderator (Resolved)',
-            updated_on_device = 'Local Computer',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(id)
-      return { success: true }
-    } catch (error: any) {
-      console.error("Resolve flag failed:", error)
-      throw new Error("Failed to resolve flag: " + error.message)
-    } finally {
-      db.close()
-    }
-  })
-export const resolveQuestionFn = resolveQuestionFnBase as any
-
-const toggleCheckedStatusFnBase = createServerFn({ method: "POST" })
-  .handler(async (ctx: any) => {
-    const { id, status } = ctx.data
-    const { Database } = (await import("bun:sqlite" as any)) as any
-    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
-      ? process.env.DB_PATH 
-      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
-    const db = new Database(dbPath)
-    try {
-      db.query(`
-        UPDATE questions 
-        SET checked_status = ?,
-            updated_by_model = 'User Moderator',
-            updated_on_device = 'Local Computer',
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(status, id)
-      return { success: true }
-    } catch (error: any) {
-      console.error("Toggle checked status failed:", error)
-      throw new Error("Failed to update checked status: " + error.message)
-    } finally {
-      db.close()
-    }
-  })
-export const toggleCheckedStatusFn = toggleCheckedStatusFnBase as any
 
 // TanStack Router definition
 export const Route = createFileRoute("/semua")({
@@ -454,7 +168,7 @@ function HierarchyFolderTree({
 }
 
 function SemuaDashboard() {
-  const { questions, stats } = Route.useLoaderData()
+  const { questions, stats } = Route.useLoaderData() as { questions: Question[]; stats: any }
   const router = useRouter()
 
   // State Management
@@ -529,7 +243,7 @@ function SemuaDashboard() {
 
     for (const q of targetQuestions) {
       let current = root
-      for (let i = 1; i < q.breadcrumbs.length; i++) {
+      for (let i = 0; i < q.breadcrumbs.length; i++) {
         const crumb = q.breadcrumbs[i]
         const cleanUrl = crumb.url.trim().replace(/\/$/, "")
         if (!current.children.has(cleanUrl)) {
@@ -1559,6 +1273,19 @@ function SemuaDashboard() {
                   </>
                 ) : (
                   <>
+                    {selectedQuestion.checked_status !== "sudah dicek" && (
+                      <Button
+                        onClick={async () => {
+                          await toggleCheckedStatusFn({ data: { id: selectedQuestion.id, status: 'sudah dicek' } })
+                          await router.invalidate()
+                        }}
+                        className="bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 text-xs px-3.5 py-1.5 font-medium rounded-lg border border-indigo-500/20 cursor-pointer flex items-center gap-1.5"
+                      >
+                        <RiCheckLine className="h-3.5 w-3.5" />
+                        Verifikasi
+                      </Button>
+                    )}
+
                     <div className="relative delete-popover-container inline-block">
                       <Button
                         onClick={() => setDeleteConfirmId({ id: selectedQuestion.id, type: "soft", isInspector: true })}
@@ -1699,16 +1426,19 @@ function SemuaDashboard() {
               </p>
               
               <div className="rounded-lg border border-border bg-background/50 p-3 max-h-[50vh] overflow-y-auto">
-                <HierarchyFolderTree
-                  node={folderTree}
-                  activeFilter={activeFilterUrl}
-                  onSelectNode={(url) => {
-                    setActiveFilterUrl(url)
-                    setIsFilterModalOpen(false)
-                  }}
-                  expandedNodes={expandedNodes}
-                  toggleExpand={toggleExpand}
-                />
+                {Array.from(folderTree.children.values()).map(childNode => (
+                  <HierarchyFolderTree
+                    key={childNode.url}
+                    node={childNode}
+                    activeFilter={activeFilterUrl}
+                    onSelectNode={(url) => {
+                      setActiveFilterUrl(url)
+                      setIsFilterModalOpen(false)
+                    }}
+                    expandedNodes={expandedNodes}
+                    toggleExpand={toggleExpand}
+                  />
+                ))}
               </div>
             </div>
 

@@ -73,16 +73,16 @@ sshpass -p "${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST}
   echo "Stopping existing containers..."
   docker compose down || true
   
-  echo "Building and starting new production containers..."
-  docker compose up --build -d
-  
   echo "Stopping existing quiz generator daemon on production if running..."
   docker stop quiz-generator-daemon || true
   docker rm quiz-generator-daemon || true
   
+  echo "Building and starting new production containers..."
+  docker compose up --build -d
+  
   echo "Starting quiz generator daemon on production in background..."
   cd /root/app/backend/quiz_generator
-  docker compose run --build -d --name quiz-generator-daemon generator python generator_flow.py
+  docker compose run --build -d --name quiz-generator-daemon generator
   
   echo "Verifying running containers:"
   cd /root/app

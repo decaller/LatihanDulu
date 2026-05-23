@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  web-dev:
+    image: node:22
+    container_name: latihandulu-web-dev
+    working_dir: /app
+    network_mode: "host"
+    volumes:
+      - .:/app
+    environment:
+      - NODE_ENV=development
+      - DB_PATH=backend/data.db
+    # We use a trick to keep the container running if needed, or run the dev server
+    command: sh -c "npm run dev"

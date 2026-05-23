@@ -1,4 +1,4 @@
-FROM oven/bun:1-slim AS runner
+FROM node:22-slim AS runner
 
 WORKDIR /app
 
@@ -11,5 +11,5 @@ ENV NODE_ENV=production
 
 EXPOSE 3000
 
-# Start Nitro server using Bun
-CMD ["bun", ".output/server/index.mjs"]
+# Start Nitro server using Node
+CMD ["node", ".output/server/index.mjs"]
