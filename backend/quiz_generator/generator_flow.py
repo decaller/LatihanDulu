@@ -133,7 +133,15 @@ def generate_questions_for_article(article: dict, model_name: str):
         logger.info(f"Generated questions for '{article['title']}' using {model_name} in {elapsed:.2f}s")
         
         # Validate with Pydantic
-        content = response['message']['content']
+        content = response['message']['content'].strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        elif content.startswith("```"):
+            content = content[3:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+        
         quiz_set = QuizSet.model_validate_json(content)
         return quiz_set.questions, elapsed
     except Exception as e:
@@ -218,5 +226,16 @@ def quiz_generator_flow(limit: int = 1500, model: str = "aya:latest"):
 
 if __name__ == "__main__":
     import sys
+    import time
+    
     target_model = sys.argv[1] if len(sys.argv) > 1 else os.getenv("DEFAULT_MODEL", "aya:latest")
-    quiz_generator_flow(limit=1500, model=target_model)
+    print(f"Starting quiz generator daemon. Model: {target_model}")
+    
+    while True:
+        try:
+            quiz_generator_flow(limit=20, model=target_model)
+        except Exception as e:
+            print(f"Flow encountered an error: {e}")
+            
+        print("Batch complete. Sleeping for 60 seconds before checking for new articles...")
+        time.sleep(60)
