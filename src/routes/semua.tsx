@@ -32,7 +32,7 @@ import {
   flagQuestionFn as _flagQuestionFn,
   resolveQuestionFn as _resolveQuestionFn,
   toggleCheckedStatusFn as _toggleCheckedStatusFn,
-} from "../lib/moderation.server"
+} from "../lib/moderation"
 
 const getQuizDataFn = _getQuizDataFn as any
 const softDeleteQuestionFn = _softDeleteQuestionFn as any

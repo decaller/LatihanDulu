@@ -1,15 +1,14 @@
-FROM node:22-slim AS runner
-
+FROM node:22-slim AS builder
 WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npm run build
 
-# Copy built application output
-COPY .output ./.output
-
-# Set production environment defaults
+FROM node:22-slim AS runner
+WORKDIR /app
+COPY --from=builder /app/.output ./.output
 ENV PORT=3000
 ENV NODE_ENV=production
-
 EXPOSE 3000
-
-# Start Nitro server using Node
 CMD ["node", ".output/server/index.mjs"]

@@ -22,8 +22,8 @@ import {
 } from "@remixicon/react"
 import { motion, AnimatePresence } from "framer-motion"
 
-import { getQuizFrontendDataFn } from "../lib/quiz.server"
-import { flagQuestionFn as _flagQuestionFn } from "../lib/moderation.server"
+import { getQuizFrontendDataFn } from "../lib/quiz"
+import { flagQuestionFn as _flagQuestionFn } from "../lib/moderation"
 
 const flagQuestionFn = _flagQuestionFn as any
 
