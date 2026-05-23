@@ -443,8 +443,8 @@ function UserQuizApp() {
 
   return (
     <div className="min-h-screen bg-background font-sans text-foreground antialiased flex flex-col items-center">
-      {/* Outer container designed specifically for Mobile width constraint but scales beautifully on web */}
-      <div className="w-full max-w-md min-h-screen bg-card flex flex-col shadow-lg border-x border-border/30 relative">
+      {/* Outer container responsive for both Mobile and Web */}
+      <div className="w-full max-w-2xl lg:max-w-3xl min-h-screen bg-card flex flex-col shadow-lg border-x border-border/30 relative transition-all duration-300">
         <AnimatePresence mode="wait">
           
           {/* 1. IDLE STATE: Beranda & Pemilihan Materi */}
