@@ -52,6 +52,7 @@ interface Question {
   updated_on_device: string | null
   updated_at: string | null
   checked_status: string
+  reference_snippet: string | null
 }
 
 interface HierarchyNode {
@@ -66,7 +67,10 @@ interface HierarchyNode {
 export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
   async () => {
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
 
     try {
       // 1. Fetch questions joined with article info
@@ -93,6 +97,7 @@ export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
         q.updated_on_device,
         q.updated_at,
         q.checked_status,
+        q.reference_snippet,
         a.title AS article_title,
         a.url AS article_url,
         a.silsilah AS article_silsilah,
@@ -172,6 +177,7 @@ export const getQuizDataFn = createServerFn({ method: "GET" }).handler(
         updated_on_device: q.updated_on_device === 'NULL' || !q.updated_on_device ? null : q.updated_on_device,
         updated_at: q.updated_at === 'NULL' || !q.updated_at ? null : q.updated_at,
         checked_status: q.checked_status === 'NULL' || !q.checked_status ? 'buatan AI' : q.checked_status,
+        reference_snippet: q.reference_snippet === 'NULL' || !q.reference_snippet ? null : q.reference_snippet,
         breadcrumbs: getBreadcrumbs(q.article_url),
       }))
 
@@ -203,7 +209,10 @@ const softDeleteQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
     try {
       db.query(`
         UPDATE questions 
@@ -227,7 +236,10 @@ const restoreQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
     try {
       db.query(`
         UPDATE questions 
@@ -251,7 +263,10 @@ const hardDeleteQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
     try {
       db.query("DELETE FROM questions WHERE id = ?").run(id)
       return { success: true }
@@ -268,7 +283,10 @@ const flagQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const { id, reason, notes } = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
     try {
       db.query(`
         UPDATE questions 
@@ -294,7 +312,10 @@ const resolveQuestionFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const id = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
     try {
       db.query(`
         UPDATE questions 
@@ -320,7 +341,10 @@ const toggleCheckedStatusFnBase = createServerFn({ method: "POST" })
   .handler(async (ctx: any) => {
     const { id, status } = ctx.data
     const { Database } = (await import("bun:sqlite" as any)) as any
-    const db = new Database("/home/abuhafi/Project/TesDeen/backend/data.db")
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
     try {
       db.query(`
         UPDATE questions 
@@ -446,6 +470,17 @@ function SemuaDashboard() {
   const [flagReason, setFlagReason] = useState("Pertanyaan tidak jelas/bias")
   const [flagNotes, setFlagNotes] = useState("")
   const [deleteConfirmId, setDeleteConfirmId] = useState<{ id: number; type: "soft" | "hard"; isInspector?: boolean } | null>(null)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null)
+
+  // Memoize distinct models from current dataset
+  const modelsList = useMemo(() => {
+    const list = new Set<string>()
+    for (const q of questions) {
+      list.add(q.created_by_model || "Gemini 2.5 Flash")
+    }
+    return Array.from(list)
+  }, [questions])
+
 
   // Synchronize selectedQuestion with fresh loader data
   useEffect(() => {
@@ -559,9 +594,28 @@ function SemuaDashboard() {
             activeFilterUrl.trim().replace(/\/$/, "")
         )
 
-      return matchesSearch && matchesHierarchy
+      // 3. Model Filter
+      const matchesModel =
+        !selectedModel ||
+        (q.created_by_model || "Gemini 2.5 Flash") === selectedModel
+
+      return matchesSearch && matchesHierarchy && matchesModel
     })
-  }, [questions, searchTerm, activeFilterUrl, viewTab])
+  }, [questions, searchTerm, activeFilterUrl, viewTab, selectedModel])
+
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
+
+  // paginatedQuestions memo
+  const paginatedQuestions = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage
+    return filteredQuestions.slice(startIndex, startIndex + itemsPerPage)
+  }, [filteredQuestions, currentPage])
+
+  // Reset page to 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, activeFilterUrl, viewTab, selectedModel])
 
   // Quick select category name
   const currentCategoryName = useMemo(() => {
@@ -735,14 +789,48 @@ function SemuaDashboard() {
                   </button>
                 )}
               </div>
+
+              {/* Filter by Model */}
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="relative">
+                  <select
+                    value={selectedModel || ""}
+                    onChange={(e) => setSelectedModel(e.target.value || null)}
+                    className="appearance-none rounded-lg border border-border bg-card py-1.5 pl-8 pr-8 text-xs font-semibold text-foreground hover:bg-muted focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer shadow-3xs"
+                  >
+                    <option value="">Semua Model AI</option>
+                    {modelsList.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <RiSparklingLine className="absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-primary shrink-0 pointer-events-none" />
+                  <RiArrowDownSLine className="absolute top-1/2 right-2 h-4 w-4 -translate-y-1/2 text-muted-foreground shrink-0 pointer-events-none" />
+                </div>
+                {selectedModel && (
+                  <button
+                    onClick={() => setSelectedModel(null)}
+                    className="rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground transition-all hover:bg-muted-foreground/15 cursor-pointer font-medium"
+                  >
+                    Reset Model
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Active filtering indicator */}
             <div className="flex shrink-0 items-center gap-2 self-start text-xs sm:self-center">
               <span className="text-muted-foreground">Menampilkan:</span>
-              <span className="max-w-[200px] truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary">
+              <span className="max-w-[150px] truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary" title={currentCategoryName}>
                 {currentCategoryName}
               </span>
+              {selectedModel && (
+                <span className="max-w-[150px] truncate rounded-md border border-primary/20 bg-primary/10 px-2 py-0.5 font-semibold text-primary flex items-center gap-1" title={selectedModel}>
+                  <RiSparklingLine className="h-3 w-3 animate-pulse shrink-0" />
+                  {selectedModel}
+                </span>
+              )}
               <span className="text-muted-foreground">
                 ({filteredQuestions.length} hasil)
               </span>
@@ -766,8 +854,8 @@ function SemuaDashboard() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   <AnimatePresence mode="popLayout">
-                    {filteredQuestions.length > 0 ? (
-                      filteredQuestions.map((q) => (
+                    {paginatedQuestions.length > 0 ? (
+                      paginatedQuestions.map((q) => (
                         <motion.tr
                           key={q.id}
                           initial={{ opacity: 0, y: 10 }}
@@ -827,6 +915,12 @@ function SemuaDashboard() {
                                 >
                                   {q.checked_status === "sudah dicek" ? "Sudah Dicek" : "Buatan AI"}
                                 </button>
+                                {q.checked_status === "buatan AI" && (
+                                  <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 border border-primary/20 px-1.5 py-0.5 text-[9px] font-medium text-primary">
+                                    <RiSparklingLine className="h-2.5 w-2.5 animate-pulse shrink-0" />
+                                    {q.created_by_model || "Gemini 2.5 Flash"}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </td>
@@ -1053,6 +1147,55 @@ function SemuaDashboard() {
               </tbody>
               </table>
             </div>
+
+            {/* Pagination Footer */}
+            {filteredQuestions.length > itemsPerPage && (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-t border-border bg-muted/30 px-6 py-4 text-xs select-none">
+                <div className="text-muted-foreground text-center sm:text-left">
+                  Menampilkan <span className="font-semibold text-foreground">{(currentPage - 1) * itemsPerPage + 1}</span> - <span className="font-semibold text-foreground">{Math.min(currentPage * itemsPerPage, filteredQuestions.length)}</span> dari <span className="font-semibold text-foreground">{filteredQuestions.length}</span> soal
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg px-3 py-1 cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                    onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <RiArrowLeftSLine className="h-4 w-4 shrink-0" />
+                    <span>Sebelumnya</span>
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.ceil(filteredQuestions.length / itemsPerPage) }).map((_, idx) => {
+                      const pageNum = idx + 1
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                            currentPage === pageNum
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-lg px-3 py-1 cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                    onClick={() => setCurrentPage((prev) => Math.min(prev + 1, Math.ceil(filteredQuestions.length / itemsPerPage)))}
+                    disabled={currentPage === Math.ceil(filteredQuestions.length / itemsPerPage)}
+                  >
+                    <span>Berikutnya</span>
+                    <RiArrowRightSLine className="h-4 w-4 shrink-0" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </main>
       </div>
@@ -1083,7 +1226,7 @@ function SemuaDashboard() {
             </div>
 
             {/* Drawer Content */}
-            <div className="flex-1 overflow-hidden relative">
+            <div className="flex-1 overflow-y-auto">
               <AnimatePresence mode="wait">
                 <motion.div
                   key={selectedQuestion.id}
@@ -1091,7 +1234,7 @@ function SemuaDashboard() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -15 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute inset-0 overflow-y-auto p-6 space-y-6"
+                  className="p-6 space-y-6"
                 >
               {selectedQuestion.deleted_at && (
                 <div className="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-400">
@@ -1159,6 +1302,18 @@ function SemuaDashboard() {
                 </span>
                 <div className="rounded-xl border border-primary/10 bg-primary/5 p-4 text-sm leading-relaxed font-semibold text-foreground">
                   {selectedQuestion.question_text}
+                </div>
+              </div>
+
+              {/* Verbatim Reference Snippet / Kutipan Verbatim */}
+              <div className="space-y-2">
+                <span className="flex items-center gap-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                  <RiBookOpenLine className="h-3.5 w-3.5 text-primary" />
+                  Kutipan Rujukan Verbatim (Ayat / Hadits / Teks Kajian)
+                </span>
+                <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-xs italic leading-relaxed text-foreground/90 relative">
+                  <span className="absolute top-2 right-3 font-serif text-3xl text-primary/20 select-none">&ldquo;</span>
+                  {selectedQuestion.reference_snippet || "Tidak ada kutipan verbatim rujukan yang tersedia."}
                 </div>
               </div>
 

@@ -8,7 +8,13 @@ import ollama
 from dotenv import load_dotenv
 import time
 
-load_dotenv()
+# Load .env dynamically using absolute path relative to this script
+current_dir = os.getenv("DB_PATH", os.path.dirname(os.path.abspath(__file__)))
+# Wait, we want to resolve relative to __file__:
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+env_path = os.path.join(project_root, ".env")
+load_dotenv(dotenv_path=env_path, override=True)
 
 # Pydantic model for structured output
 class QuizQuestion(BaseModel):
@@ -26,7 +32,14 @@ class QuizSet(BaseModel):
 
 @task
 def get_articles_to_process(limit: int = 5) -> List[dict]:
-    db_path = os.getenv("DB_PATH", "data.db")
+    db_path = os.getenv("DB_PATH", "backend/data.db")
+    
+    # Resolve relative db_path to absolute relative to project root
+    if not os.path.isabs(db_path):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        db_path = os.path.join(project_root, db_path)
+        
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
@@ -49,13 +62,24 @@ def generate_questions_for_article(article: dict, model_name: str):
     logger = get_run_logger()
     client = ollama.Client(host=os.getenv("OLLAMA_URL"))
     
-    # Split content into paragraphs
-    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', article['content']) if p.strip()]
+    content = article['content'].strip()
+    content_len = len(content)
     
-    # Take a rolling chunk of at least 4 paragraphs
-    # For now, we take the first 4-6 paragraphs as a significant chunk
-    chunk_size = 6
-    chunk = "\n\n".join(paragraphs[:chunk_size])
+    # Determine number of questions dynamically based on content length
+    if content_len < 1500:
+        num_questions = 1
+    elif content_len < 3000:
+        num_questions = 2
+    elif content_len < 6000:
+        num_questions = 3
+    else:
+        num_questions = 5
+        
+    # Split content into paragraphs
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', content) if p.strip()]
+    
+    # Pass up to 15 paragraphs of context for longer text
+    chunk = "\n\n".join(paragraphs[:15])
     
     metadata = f"""
     Title: {article['title']}
@@ -66,7 +90,7 @@ def generate_questions_for_article(article: dict, model_name: str):
     prompt = f"""
     Bismillah. You are a noble and scholarly Islamic teacher (Ustadz) who strictly adheres to the Manhaj Salaf (the methodology of the righteous predecessors) and a distinguished graduate of the Islamic University of Madinah.
     You possess deep knowledge of Islamic sciences, absolute precision in teaching, and you strictly rely on authentic, verified evidence from the provided text, free from any bias or speculation.
-    Based on the following article metadata and content chunk, generate 3 high-quality multiple choice questions in Indonesian language.
+    Based on the following article metadata and content chunk, generate {num_questions} high-quality multiple choice questions in Indonesian language.
     
     Metadata:
     {metadata}
@@ -117,25 +141,58 @@ def generate_questions_for_article(article: dict, model_name: str):
         return [], 0
 
 @task
-def save_questions(article_id: int, questions: List[QuizQuestion]):
+def save_questions(article_id: int, questions: List[QuizQuestion], model_name: str):
     if not questions:
         return
         
-    db_path = os.getenv("DB_PATH", "data.db")
+    db_path = os.getenv("DB_PATH", "backend/data.db")
+    
+    # Resolve relative db_path to absolute relative to project root
+    if not os.path.isabs(db_path):
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(os.path.dirname(current_dir))
+        db_path = os.path.join(project_root, db_path)
+        
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     for q in questions:
         cursor.execute("""
-            INSERT INTO questions (article_id, question_text, option_a, option_b, option_c, option_d, correct_option, explanation, reference_snippet)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (article_id, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, q.correct_option.upper(), q.explanation, q.reference_snippet))
+            INSERT INTO questions (
+                article_id, 
+                question_text, 
+                option_a, 
+                option_b, 
+                option_c, 
+                option_d, 
+                correct_option, 
+                explanation, 
+                reference_snippet,
+                created_by_model,
+                created_on_device,
+                checked_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            article_id, 
+            q.question_text, 
+            q.option_a, 
+            q.option_b, 
+            q.option_c, 
+            q.option_d, 
+            q.correct_option.upper(), 
+            q.explanation, 
+            q.reference_snippet,
+            model_name,
+            "Server-Prod-01",
+            "buatan AI"
+        ))
     
     conn.commit()
     conn.close()
 
 @flow(name="Quiz Generation Pipeline - High Quality")
-def quiz_generator_flow(limit: int = 5, model: str = "aya:latest"):
+def quiz_generator_flow(limit: int = 1500, model: str = "aya:latest"):
     logger = get_run_logger()
     logger.info(f"Starting high-quality quiz generation flow using model: {model}")
     
@@ -151,7 +208,7 @@ def quiz_generator_flow(limit: int = 5, model: str = "aya:latest"):
     for article in articles:
         questions, elapsed = generate_questions_for_article(article, model)
         if questions:
-            save_questions(article['id'], questions)
+            save_questions(article['id'], questions, model)
             total_time += elapsed
             generated_count += len(questions)
             
@@ -162,4 +219,4 @@ def quiz_generator_flow(limit: int = 5, model: str = "aya:latest"):
 if __name__ == "__main__":
     import sys
     target_model = sys.argv[1] if len(sys.argv) > 1 else os.getenv("DEFAULT_MODEL", "aya:latest")
-    quiz_generator_flow(limit=3, model=target_model)
+    quiz_generator_flow(limit=1500, model=target_model)

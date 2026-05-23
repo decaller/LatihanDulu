@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - /home/abuhafi/Project/TesDeen/backend/data.db:/app/data.db
+      - ../data.db:/app/data.db
     environment:
       - OLLAMA_URL=http://100.121.116.17:11434
       - DB_PATH=/app/data.db
