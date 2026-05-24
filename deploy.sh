@@ -46,7 +46,7 @@ echo "Building the application locally with bun..."
 
 # 3. Package the required files
 echo "Packaging files into deploy.tar.gz..."
-tar -czf deploy.tar.gz .output backend/quiz_generator scratch .env Dockerfile docker-compose.yml
+tar -czf deploy.tar.gz .output src backend/quiz_generator scratch .env Dockerfile docker-compose.yml package.json package-lock.json tsconfig.json vite.config.ts components.json
 
 # 4. Upload the package using sshpass and scp
 echo "Uploading package to remote server..."
