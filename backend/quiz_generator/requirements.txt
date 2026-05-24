@@ -3,3 +3,4 @@ pydantic
 ollama
 httpx
 python-dotenv
+beautifulsoup4
