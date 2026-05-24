@@ -76,6 +76,7 @@ interface HierarchyNode {
   children: Map<string, HierarchyNode>
   isLeaf: boolean
   articleId?: number
+  questionCount: number
 }
 
 // TanStack Router definition
@@ -144,8 +145,11 @@ function HierarchyFolderTree({
           <RiBookOpenLine className="h-3.5 w-3.5 shrink-0 text-primary/80" />
         )}
 
-        <span className="max-w-[180px] truncate font-sans" title={node.title}>
+        <span className="max-w-[320px] flex-1 truncate font-sans" title={node.title}>
           {node.title}
+        </span>
+        <span className="ml-auto rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {node.questionCount}
         </span>
       </div>
 
@@ -233,6 +237,7 @@ function SemuaDashboard() {
       url: "https://ilmiyyah.com",
       children: new Map(),
       isLeaf: false,
+      questionCount: 0,
     }
 
     const targetQuestions = questions.filter(q => {
@@ -243,6 +248,8 @@ function SemuaDashboard() {
 
     for (const q of targetQuestions) {
       let current = root
+      current.questionCount++
+      
       for (let i = 0; i < q.breadcrumbs.length; i++) {
         const crumb = q.breadcrumbs[i]
         const cleanUrl = crumb.url.trim().replace(/\/$/, "")
@@ -254,9 +261,11 @@ function SemuaDashboard() {
             isLeaf: i === q.breadcrumbs.length - 1,
             articleId:
               i === q.breadcrumbs.length - 1 ? q.article_id : undefined,
+            questionCount: 0,
           })
         }
         current = current.children.get(cleanUrl)!
+        current.questionCount++
       }
     }
     return root
@@ -1402,7 +1411,7 @@ function SemuaDashboard() {
             className="absolute inset-0 cursor-pointer"
             onClick={() => setIsFilterModalOpen(false)}
           />
-          <div className="animate-scaleIn relative flex max-h-[85vh] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-2xl">
+          <div className="animate-scaleIn relative flex max-h-[85vh] w-full max-w-2xl flex-col rounded-xl border border-border bg-card shadow-2xl">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-border bg-muted/30 p-5">
               <div className="flex items-center gap-2">
@@ -1425,7 +1434,7 @@ function SemuaDashboard() {
                 Pilih silsilah materi untuk menyaring soal evaluasi di bawah. Klik ikon panah untuk memperluas bab.
               </p>
               
-              <div className="rounded-lg border border-border bg-background/50 p-3 max-h-[50vh] overflow-y-auto">
+              <div className="rounded-lg border border-border bg-background/50 p-3 max-h-[60vh] overflow-y-auto">
                 {Array.from(folderTree.children.values()).map(childNode => (
                   <HierarchyFolderTree
                     key={childNode.url}

@@ -42,11 +42,11 @@ fi
 
 # 2. Rebuild the application locally
 echo "Building the application locally with bun..."
-bun run build
+# bun run build
 
 # 3. Package the required files
 echo "Packaging files into deploy.tar.gz..."
-tar -czf deploy.tar.gz .output backend/data.db backend/quiz_generator .env Dockerfile docker-compose.yml
+tar -czf deploy.tar.gz .output backend/quiz_generator scratch .env Dockerfile docker-compose.yml
 
 # 4. Upload the package using sshpass and scp
 echo "Uploading package to remote server..."

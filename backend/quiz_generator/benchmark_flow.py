@@ -57,15 +57,15 @@ def get_advanced_articles(limit: int = 2) -> List[dict]:
     return articles
 
 @task
-def summarize_with_mt5(article_content: str) -> str:
+def summarize_with_model(article_content: str) -> str:
     logger = get_run_logger()
     client = ollama.Client(host=os.getenv("OLLAMA_URL"))
-    model_name = "hf.co/ar08/mT5_multilingual_XLSum-Q4_K_M-GGUF:Q4_K_M"
+    model_name = "aya:latest"
     
     logger.info(f"Summarizing article using {model_name}...")
     
-    # mT5 XLSum prompt format (simple instruction or direct input depending on GGUF tuning)
-    prompt = f"Summarize the following text in Indonesian:\n\n{article_content[:4000]}"
+    # Aya prompt format
+    prompt = f"Ringkaslah teks berikut dalam bahasa Indonesia yang baku dan padat:\n\n{article_content[:4000]}"
     
     try:
         response = client.generate(model=model_name, prompt=prompt)
@@ -73,7 +73,7 @@ def summarize_with_mt5(article_content: str) -> str:
         logger.info("Summary completed.")
         return summary
     except Exception as e:
-        logger.error(f"mT5 Summarization failed: {str(e)}")
+        logger.error(f"Summarization failed: {str(e)}")
         return "Summary unavailable (Error)"
 
 @task
@@ -160,11 +160,11 @@ def save_advanced_questions(article_id: int, questions: List[QuizQuestion], mode
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     for q in questions:
-        cursor.execute(\"\"\"
+        cursor.execute("""
             INSERT INTO questions (article_id, question_text, option_a, option_b, option_c, option_d, 
             correct_option, explanation, reference_snippet, created_by_model, created_on_device, checked_status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        \"\"\", (article_id, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, 
+        """, (article_id, q.question_text, q.option_a, q.option_b, q.option_c, q.option_d, 
                  q.correct_option.upper(), q.explanation, q.reference_snippet, model_name, "Server-Prod-Benchmark", "buatan AI"))
     conn.commit()
     conn.close()
@@ -186,8 +186,8 @@ def advanced_benchmark_flow(models: List[str], article_count: int = 2):
         model_stats = {"success": 0, "total_time": 0, "errors": []}
         
         for article in articles:
-            # 1. Summarize with mT5 (only once per article could be optimized, but here we do it per test flow)
-            summary = summarize_with_mt5(article['content'])
+            # 1. Summarize
+            summary = summarize_with_model(article['content'])
             
             # 2. Generate questions
             success, elapsed, error, questions = generate_questions_advanced_task(article, summary, model)
@@ -220,12 +220,13 @@ def advanced_benchmark_flow(models: List[str], article_count: int = 2):
     logger.info(f"Benchmark complete! Report saved locally to {report_path}")
 
 if __name__ == "__main__":
-    # Test a mix of Qwen 2.5 and 3.5 (installed ones)
+    # Testing the full Qwen 3.5 spectrum against previous winners
     qwen_models = [
+        "qwen3.5:4b",
+        "qwen3.5:9b",
+        "qwen3.5:27b",
+        "qwen3.5:35b",
         "qwen2.5:7b",
-        "qwen2.5:32b",
-        "qwen3.5:0.8b",
-        "qwen3.5:2b",
-        "llama3.1:latest" # Baseline
+        "qwen2.5:32b"
     ]
     advanced_benchmark_flow(models=qwen_models, article_count=2)
