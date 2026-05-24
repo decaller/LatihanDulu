@@ -315,3 +315,295 @@ export const toggleCheckedStatusFn = createServerFn({ method: "POST" })
       db.close()
     }
   })
+
+export const getHierarchyTreeDataFn = createServerFn({ method: "GET" }).handler(
+  async () => {
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
+
+    try {
+      // 1. Fetch hierarchy mapping
+      const hierarchyRows = db
+        .prepare("SELECT id, parent_url, child_url, title, sequence_order FROM hierarchy ORDER BY sequence_order ASC, id ASC")
+        .all() as any[]
+
+      // 2. Fetch all articles
+      const articleRows = db
+        .prepare("SELECT id, url, title, speaker FROM articles")
+        .all() as any[]
+
+      // Create maps
+      const articleMap = new Map<string, any>()
+      for (const art of articleRows) {
+        if (art.url) {
+          articleMap.set(art.url.trim().replace(/\/$/, ""), art)
+        }
+      }
+
+      // Group children by parentUrl
+      const parentToChildren = new Map<string, any[]>()
+      for (const row of hierarchyRows) {
+        const parentUrl = row.parent_url ? row.parent_url.trim().replace(/\/$/, "") : ""
+        if (!parentToChildren.has(parentUrl)) {
+          parentToChildren.set(parentUrl, [])
+        }
+        parentToChildren.get(parentUrl)!.push(row)
+      }
+
+      // Recursive builder starting from root
+      const buildTree = (url: string): any[] => {
+        const childrenRows = parentToChildren.get(url) || []
+        const childrenNodes: any[] = []
+
+        for (const row of childrenRows) {
+          const childUrl = row.child_url ? row.child_url.trim().replace(/\/$/, "") : ""
+          const isArticle = articleMap.has(childUrl)
+          const articleInfo = articleMap.get(childUrl)
+
+          const node: any = {
+            id: childUrl,
+            isGroup: !isArticle,
+            data: {
+              id: row.id,
+              title: row.title || (isArticle ? articleInfo.title : childUrl),
+              url: childUrl,
+              parentUrl: url,
+              isArticle,
+              articleId: isArticle ? articleInfo.id : undefined,
+              speaker: isArticle ? articleInfo.speaker : undefined,
+              sequenceOrder: row.sequence_order || 0,
+            }
+          }
+
+          if (!isArticle) {
+            // Recursively build children
+            node.children = buildTree(childUrl)
+          }
+
+          childrenNodes.push(node)
+        }
+
+        return childrenNodes
+      }
+
+      // Root is usually https://ilmiyyah.com
+      const rootUrl = "https://ilmiyyah.com"
+      const tree = buildTree(rootUrl)
+
+      // 3. Find unmapped articles
+      const mappedUrls = new Set(hierarchyRows.map(r => r.child_url ? r.child_url.trim().replace(/\/$/, "") : ""))
+      const unmappedArticles = articleRows
+        .filter(art => art.url && !mappedUrls.has(art.url.trim().replace(/\/$/, "")))
+        .map(art => ({
+          id: art.url.trim().replace(/\/$/, ""),
+          isGroup: false,
+          data: {
+            title: art.title,
+            url: art.url.trim().replace(/\/$/, ""),
+            isArticle: true,
+            articleId: art.id,
+            speaker: art.speaker,
+            parentUrl: null,
+            sequenceOrder: 0,
+          }
+        }))
+
+      return {
+        tree,
+        unmappedArticles,
+        stats: {
+          totalHierarchyItems: hierarchyRows.length,
+          totalArticles: articleRows.length,
+          unmappedCount: unmappedArticles.length,
+        }
+      }
+    } catch (error: any) {
+      console.error("Failed to load hierarchy tree data:", error)
+      throw new Error("Failed to load hierarchy tree: " + error.message)
+    } finally {
+      db.close()
+    }
+  }
+)
+
+export const moveHierarchyNodeFn = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const { childUrl, newParentUrl, siblings } = ctx.data
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
+
+    try {
+      db.transaction(() => {
+        // 1. Check if the mapping already exists in hierarchy.
+        // If not (e.g. dragging from Unmapped Articles), we must INSERT it!
+        const existing = db.prepare("SELECT id FROM hierarchy WHERE child_url = ?").get(childUrl) as any
+
+        // Find the title for the new record
+        let nodeTitle = "Baru"
+        if (!existing) {
+          // If it was an article, find its title from articles table
+          const article = db.prepare("SELECT title FROM articles WHERE url = ?").get(childUrl) as any
+          if (article) {
+            nodeTitle = article.title
+          } else {
+            // Extract a title from the URL slug
+            const parts = childUrl.split("/")
+            nodeTitle = parts[parts.length - 1] || "Materi Baru"
+          }
+
+          db.prepare("INSERT INTO hierarchy (parent_url, child_url, title, sequence_order) VALUES (?, ?, ?, 0)")
+            .run(newParentUrl, childUrl, nodeTitle)
+        } else {
+          db.prepare("UPDATE hierarchy SET parent_url = ? WHERE child_url = ?")
+            .run(newParentUrl, childUrl)
+        }
+
+        // 2. Re-sequence all siblings under the new parent to ensure stability
+        if (siblings && Array.isArray(siblings)) {
+          const updateStmt = db.prepare("UPDATE hierarchy SET sequence_order = ? WHERE child_url = ?")
+          for (let i = 0; i < siblings.length; i++) {
+            updateStmt.run(i, siblings[i])
+          }
+        }
+      })()
+
+      return { success: true }
+    } catch (error: any) {
+      console.error("Failed to move hierarchy node:", error)
+      throw new Error("Failed to move hierarchy node: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+
+export const createHierarchyFolderFn = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const { parentUrl, title } = ctx.data
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
+
+    try {
+      // Sluggify title to make unique childUrl
+      const cleanTitle = title.trim().toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, "")
+        .replace(/\s+/g, "-")
+        .replace(/-+/g, "-")
+
+      const uniqueSuffix = Math.floor(1000 + Math.random() * 9000)
+      const childUrl = `${parentUrl.replace(/\/$/, "")}/${cleanTitle}-${uniqueSuffix}`
+
+      // Get highest sequence_order under parent
+      const maxSeqRow = db.prepare("SELECT MAX(sequence_order) as max_seq FROM hierarchy WHERE parent_url = ?").get(parentUrl) as any
+      const nextSeq = (maxSeqRow?.max_seq !== null ? maxSeqRow.max_seq : -1) + 1
+
+      db.prepare("INSERT INTO hierarchy (parent_url, child_url, title, sequence_order) VALUES (?, ?, ?, ?)")
+        .run(parentUrl, childUrl, title, nextSeq)
+
+      return { success: true, folderUrl: childUrl }
+    } catch (error: any) {
+      console.error("Failed to create folder:", error)
+      throw new Error("Failed to create folder: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+
+export const renameHierarchyNodeFn = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const { childUrl, newTitle } = ctx.data
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
+
+    try {
+      db.prepare("UPDATE hierarchy SET title = ? WHERE child_url = ?").run(newTitle, childUrl)
+      return { success: true }
+    } catch (error: any) {
+      console.error("Failed to rename node:", error)
+      throw new Error("Failed to rename node: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+
+export const deleteHierarchyNodeFn = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const { childUrl } = ctx.data
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
+
+    try {
+      db.transaction(() => {
+        // Find if this node has child relations under it (i.e. is a parent to others)
+        const hasChildren = db.prepare("SELECT count(*) as count FROM hierarchy WHERE parent_url = ?").get(childUrl) as any
+        if (hasChildren && hasChildren.count > 0) {
+          // Orphan the children by moving them up to the deleted node's parent!
+          const parentRow = db.prepare("SELECT parent_url FROM hierarchy WHERE child_url = ?").get(childUrl) as any
+          const parentUrl = parentRow ? parentRow.parent_url : "https://ilmiyyah.com"
+
+          db.prepare("UPDATE hierarchy SET parent_url = ? WHERE parent_url = ?").run(parentUrl, childUrl)
+        }
+
+      db.prepare("DELETE FROM hierarchy WHERE child_url = ?").run(childUrl)
+      })()
+
+      return { success: true }
+    } catch (error: any) {
+      console.error("Failed to delete node:", error)
+      throw new Error("Failed to delete node: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+
+export const saveFullHierarchyFn = createServerFn({ method: "POST" })
+  .handler(async (ctx: any) => {
+    const updates = ctx.data // Array of { childUrl, parentUrl, sequenceOrder }
+    const dbPath = process.env.DB_PATH && process.env.DB_PATH.startsWith("/") 
+      ? process.env.DB_PATH 
+      : `${process.cwd()}/${process.env.DB_PATH || "backend/data.db"}`
+    const db = new Database(dbPath)
+
+    try {
+      db.transaction(() => {
+        const updateStmt = db.prepare(`
+          UPDATE hierarchy 
+          SET parent_url = ?, sequence_order = ? 
+          WHERE child_url = ?
+        `)
+
+        for (const item of updates) {
+          // Check if child_url exists in hierarchy mapping at all.
+          // (e.g. if it was an unmapped article dragged in)
+          const exists = db.prepare("SELECT id FROM hierarchy WHERE child_url = ?").get(item.childUrl) as any
+          if (!exists) {
+            // Find article title
+            const article = db.prepare("SELECT title FROM articles WHERE url = ?").get(item.childUrl) as any
+            const title = article ? article.title : (item.childUrl.split("/").pop() || "Baru")
+            db.prepare("INSERT INTO hierarchy (parent_url, child_url, title, sequence_order) VALUES (?, ?, ?, ?)")
+              .run(item.parentUrl, item.childUrl, title, item.sequenceOrder)
+          } else {
+            // Normal update parent and order
+            updateStmt.run(item.parentUrl, item.sequenceOrder, item.childUrl)
+          }
+        }
+      })()
+      return { success: true }
+    } catch (error: any) {
+      console.error("Failed to save full hierarchy:", error)
+      throw new Error("Failed to save hierarchy changes: " + error.message)
+    } finally {
+      db.close()
+    }
+  })
+
+

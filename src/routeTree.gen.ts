@@ -9,9 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SilsilahRouteImport } from './routes/silsilah'
 import { Route as SemuaRouteImport } from './routes/semua'
 import { Route as IndexRouteImport } from './routes/index'
 
+const SilsilahRoute = SilsilahRouteImport.update({
+  id: '/silsilah',
+  path: '/silsilah',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SemuaRoute = SemuaRouteImport.update({
   id: '/semua',
   path: '/semua',
@@ -26,31 +32,42 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/semua': typeof SemuaRoute
+  '/silsilah': typeof SilsilahRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/semua': typeof SemuaRoute
+  '/silsilah': typeof SilsilahRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/semua': typeof SemuaRoute
+  '/silsilah': typeof SilsilahRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/semua'
+  fullPaths: '/' | '/semua' | '/silsilah'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/semua'
-  id: '__root__' | '/' | '/semua'
+  to: '/' | '/semua' | '/silsilah'
+  id: '__root__' | '/' | '/semua' | '/silsilah'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SemuaRoute: typeof SemuaRoute
+  SilsilahRoute: typeof SilsilahRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/silsilah': {
+      id: '/silsilah'
+      path: '/silsilah'
+      fullPath: '/silsilah'
+      preLoaderRoute: typeof SilsilahRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/semua': {
       id: '/semua'
       path: '/semua'
@@ -71,6 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SemuaRoute: SemuaRoute,
+  SilsilahRoute: SilsilahRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

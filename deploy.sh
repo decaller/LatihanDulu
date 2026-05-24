@@ -61,6 +61,14 @@ sshpass -p "${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST}
   # Ensure app directory exists
   mkdir -p /root/app
   
+  # Take a safe backup of the remote production database if it exists before extraction
+  if [ -f /root/app/backend/data.db ]; then
+    echo "Alhamdulillah, backing up remote production database..."
+    mkdir -p /root/app/backend/backups
+    cp /root/app/backend/data.db /root/app/backend/backups/data_deploy_$(date +%Y%m%d_%H%M%S).db
+    echo "Backup completed successfully."
+  fi
+  
   # Extract files into the app directory
   echo "Extracting deployment archive..."
   tar -xzf /root/deploy.tar.gz -C /root/app
