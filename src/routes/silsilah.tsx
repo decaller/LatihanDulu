@@ -417,7 +417,7 @@ function SilsilahManagerDashboard() {
                       setSelectedNode(null)
                     }
                   }}
-                  renderNode={({ node, isExpanded, isSelected, toggle, select }) => {
+                  renderNode={({ node, isExpanded, isSelected, toggle, select, depth }) => {
                     const nodeData = node.data as any
                     const isArticle = nodeData.isArticle
 
@@ -427,7 +427,8 @@ function SilsilahManagerDashboard() {
                           e.stopPropagation()
                           select()
                         }}
-                        className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-all duration-150 cursor-pointer ${
+                        style={{ paddingLeft: `${depth * 20 + 10}px` }}
+                        className={`flex items-center gap-2 rounded-lg pr-2.5 py-1.5 text-xs transition-all duration-150 cursor-pointer ${
                           isSelected
                             ? "border border-primary/20 bg-primary/10 font-bold text-primary shadow-3xs"
                             : "hover:bg-muted text-foreground"
