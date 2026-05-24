@@ -416,7 +416,6 @@ function SilsilahManagerDashboard() {
                   onItemsChange={handleSilsilahChange}
                   draggable={true}
                   droppable={true}
-                  defaultExpandAll={true}
                   canDrag={(node) => node.id !== "https://ilmiyyah.com"}
                   canDrop={(event) => event.target.id !== "https://ilmiyyah.com" || event.position === "inside"}
                   selectionMode="single"
