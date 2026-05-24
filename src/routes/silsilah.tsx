@@ -94,11 +94,13 @@ function SilsilahManagerDashboard() {
     const traverse = (nodes: any[], depth: number) => {
       nodes.forEach(node => {
         if (node.isGroup) {
-          folders.push({
-            url: node.id,
-            title: node.data.title,
-            depth: depth + 1
-          })
+          if (node.id !== "https://ilmiyyah.com") {
+            folders.push({
+              url: node.id,
+              title: node.data.title,
+              depth: depth + 1
+            })
+          }
           if (node.children) {
             traverse(node.children, depth + 1)
           }
@@ -152,7 +154,12 @@ function SilsilahManagerDashboard() {
       })
     }
 
-    traverse(currentSilsilah, "https://ilmiyyah.com")
+    const rootNode = currentSilsilah[0]
+    if (rootNode && rootNode.id === "https://ilmiyyah.com") {
+      traverse(rootNode.children || [], "https://ilmiyyah.com")
+    } else {
+      traverse(currentSilsilah, "https://ilmiyyah.com")
+    }
 
     try {
       await saveFullHierarchyFn({ data: updates })
@@ -362,16 +369,17 @@ function SilsilahManagerDashboard() {
                   }
 
                   // Splice/insert into silsilah items reactively
-                  const updatedSilsilah = [...silsilahItems]
+                  const updatedSilsilah = JSON.parse(JSON.stringify(silsilahItems))
                   
-                  if (newParentUrl === "https://ilmiyyah.com") {
-                    updatedSilsilah.push(newNode)
+                  const parentNode = findNode(updatedSilsilah, newParentUrl)
+                  if (parentNode) {
+                    if (!parentNode.children) parentNode.children = []
+                    parentNode.children.push(newNode)
+                  } else if (newParentUrl === "https://ilmiyyah.com" && updatedSilsilah[0]?.id === "https://ilmiyyah.com") {
+                    if (!updatedSilsilah[0].children) updatedSilsilah[0].children = []
+                    updatedSilsilah[0].children.push(newNode)
                   } else {
-                    const parentNode = findNode(updatedSilsilah, newParentUrl)
-                    if (parentNode) {
-                      if (!parentNode.children) parentNode.children = []
-                      parentNode.children.push(newNode)
-                    }
+                    updatedSilsilah.push(newNode)
                   }
 
                   const updatedUnmapped = unmappedItems.filter(item => item.id !== sourceId)
@@ -408,6 +416,9 @@ function SilsilahManagerDashboard() {
                   onItemsChange={handleSilsilahChange}
                   draggable={true}
                   droppable={true}
+                  defaultExpandAll={true}
+                  canDrag={(node) => node.id !== "https://ilmiyyah.com"}
+                  canDrop={(event) => event.target.id !== "https://ilmiyyah.com" || event.position === "inside"}
                   selectionMode="single"
                   onSelectedIdsChange={(ids) => {
                     if (ids.length > 0) {

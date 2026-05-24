@@ -390,7 +390,22 @@ export const getHierarchyTreeDataFn = createServerFn({ method: "GET" }).handler(
 
       // Root is usually https://ilmiyyah.com
       const rootUrl = "https://ilmiyyah.com"
-      const tree = buildTree(rootUrl)
+      const childrenNodes = buildTree(rootUrl)
+      const tree = [
+        {
+          id: rootUrl,
+          isGroup: true,
+          data: {
+            id: 0,
+            title: "Kajian Ilmiyyah (Root)",
+            url: rootUrl,
+            parentUrl: null,
+            isArticle: false,
+            sequenceOrder: 0,
+          },
+          children: childrenNodes
+        }
+      ]
 
       // 3. Find unmapped articles
       const mappedUrls = new Set(hierarchyRows.map(r => r.child_url ? r.child_url.trim().replace(/\/$/, "") : ""))
