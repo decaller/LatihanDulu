@@ -1,7 +1,10 @@
 import sqlite3
 import os
 import csv
-# Bismillah. Hierarchy Fix from CSV source of truth.
+import urllib.request
+import re
+import html
+# Bismillah. Hierarchy Fix from CSV source of truth with web fallback.
 
 DB_PATH = "backend/data.db"
 
@@ -13,12 +16,41 @@ def normalize_url(url):
     elif not url.startswith("http") and "." in url: url = "https://ilmiyyah.com/" + url
     return url
 
+def fetch_html_title(url):
+    print(f"Fetching title for {url} from web...")
+    try:
+        req = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            html_content = response.read().decode('utf-8', errors='ignore')
+            match = re.search(r'<title>(.*?)</title>', html_content, re.IGNORECASE | re.DOTALL)
+            if match:
+                title = match.group(1).strip()
+                title = html.unescape(title)
+                for suffix in [" – ilmiyyah.com", " - ilmiyyah.com", " &#8211; ilmiyyah.com", " &ndash; ilmiyyah.com"]:
+                    if title.endswith(suffix):
+                        title = title[:-len(suffix)].strip()
+                print(f"Resolved title: {title}")
+                return title
+    except Exception as e:
+        print(f"Error fetching title for {url}: {e}")
+    return None
+
 def get_article_title(cursor, url):
     normalized = normalize_url(url)
     cursor.execute("SELECT title FROM articles WHERE url = ?", (normalized,))
     row = cursor.fetchone()
-    if row:
+    if row and row[0]:
         return row[0]
+    
+    if normalized.startswith("http"):
+        web_title = fetch_html_title(normalized)
+        if web_title:
+            cursor.execute("INSERT OR REPLACE INTO articles (url, title) VALUES (?, ?)", (normalized, web_title))
+            return web_title
+            
     return None
 
 def update_hierarchy(cursor, parent_url, child_url, title, sequence_order):
