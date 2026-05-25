@@ -46,7 +46,7 @@ echo "Building the application locally with bun..."
 
 # 3. Package the required files
 echo "Packaging files into deploy.tar.gz..."
-tar -czf deploy.tar.gz .output src backend/quiz_generator scratch .env Dockerfile docker-compose.yml package.json package-lock.json tsconfig.json vite.config.ts components.json
+tar -czf deploy.tar.gz .output src backend/quiz_generator scratch .env Dockerfile docker-compose.yml package.json package-lock.json tsconfig.json vite.config.ts components.json "ilmiyyah.com links completed.csv"
 
 # 4. Upload the package using sshpass and scp
 echo "Uploading package to remote server..."
@@ -78,6 +78,10 @@ sshpass -p "${SSH_PASS}" ssh -o StrictHostKeyChecking=no ${SSH_USER}@${SSH_HOST}
   
   # Run docker compose
   cd /root/app
+  
+  echo "Remaking silsilah taxonomies on production database using completed CSV..."
+  python3 scratch/fix_hierarchy_from_csv.py
+  
   echo "Stopping existing containers..."
   docker compose down || true
   
