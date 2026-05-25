@@ -359,7 +359,9 @@ export const getHierarchyTreeDataFn = createServerFn({ method: "GET" }).handler(
 
         for (const row of childrenRows) {
           const childUrl = row.child_url ? row.child_url.trim().replace(/\/$/, "") : ""
-          const isArticle = articleMap.has(childUrl)
+          // A node is only a leaf article if it has a record in the articles table AND does not have children in hierarchy
+          const hasChildren = parentToChildren.has(childUrl)
+          const isArticle = articleMap.has(childUrl) && !hasChildren
           const articleInfo = articleMap.get(childUrl)
 
           const node: any = {
