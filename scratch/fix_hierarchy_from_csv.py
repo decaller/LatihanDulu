@@ -87,7 +87,9 @@ def main():
             idx += 1
             folder_name = row['Folder'].strip()
             subfolder = row['Subfolder'].strip()
+            subfolder_title = row.get('Subfolder Title', '').strip()
             article_url = row['Article'].strip()
+            article_title = row.get('Article Title', '').strip()
 
             # 1. Ensure Root -> Folder mapping
             folder_url = f"https://ilmiyyah.com/folder/{folder_name.lower().replace(' ', '-')}"
@@ -98,15 +100,15 @@ def main():
             if not article_url:
                 # 2-level: Folder -> Subfolder (which is a URL)
                 target_url = normalize_url(subfolder)
-                title = get_article_title(cursor, target_url) or subfolder.split('/')[-1].replace('-', ' ').title()
+                title = subfolder_title or get_article_title(cursor, target_url) or subfolder.split('/')[-1].replace('-', ' ').title()
                 update_hierarchy(cursor, folder_url, target_url, title, idx)
             else:
                 # 3-level: Folder -> Subfolder (Name or URL) -> Article (URL)
                 if subfolder.startswith('http'):
                     subfolder_url = normalize_url(subfolder)
-                    subfolder_name = get_article_title(cursor, subfolder_url) or subfolder.split('/')[-1].replace('-', ' ').title()
+                    subfolder_name = subfolder_title or get_article_title(cursor, subfolder_url) or subfolder.split('/')[-1].replace('-', ' ').title()
                 else:
-                    subfolder_name = subfolder
+                    subfolder_name = subfolder_title or subfolder
                     subfolder_url = f"{folder_url}/{subfolder_name.lower().replace(' ', '-')}"
                 
                 if subfolder_url not in virtual_folders:
@@ -114,7 +116,7 @@ def main():
                     virtual_folders[subfolder_url] = subfolder_name
                 
                 target_url = normalize_url(article_url)
-                title = get_article_title(cursor, target_url) or article_url.split('/')[-1].replace('-', ' ').title()
+                title = article_title or get_article_title(cursor, target_url) or article_url.split('/')[-1].replace('-', ' ').title()
                 update_hierarchy(cursor, subfolder_url, target_url, title, idx)
 
     conn.commit()
